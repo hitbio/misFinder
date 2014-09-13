@@ -27,10 +27,10 @@ short fillGlobalAlignSeg(queryMatchInfo_t *queryMatchInfoSet, segLinkSet_t *segL
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-		//if(queryMatchInfoSet->queryArray[i].queryID==27 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "27")==0)
-		//{
-		//	printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
-		//}
+//		if(queryMatchInfoSet->queryArray[i].queryID==74 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "ctg7180000002429")==0)
+//		{
+//			printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
+//		}
 		// ########################### Debug information ##############################
 
 		// fill global segment array
@@ -41,11 +41,11 @@ short fillGlobalAlignSeg(queryMatchInfo_t *queryMatchInfoSet, segLinkSet_t *segL
 		}
 
 		// trim alignment information of unmatched query ends
-		if(trimAlignInfoQueryEnds(queryMatchInfoSet->queryArray+i, queryMatchInfoSet->subjectArray)==FAILED)
-		{
-			printf("line=%d, In %s(), cannot trim the alignment information of unmatched query ends, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
+//		if(trimAlignInfoQueryEnds(queryMatchInfoSet->queryArray+i, queryMatchInfoSet->subjectArray)==FAILED)
+//		{
+//			printf("line=%d, In %s(), cannot trim the alignment information of unmatched query ends, error!\n", __LINE__, __func__);
+//			return FAILED;
+//		}
 
 		// determine global matchKind
 		if(determineGlobalMatchKindSingleQuery(queryMatchInfoSet->queryArray+i)==FAILED)
@@ -1050,7 +1050,7 @@ short getAdjacentRowGlobalSeg(int32_t *adjacentRow, int32_t startSegRow, int32_t
 short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int32_t *globalSegNum, query_t *queryItem)
 {
 	int32_t i, j, itemNum, startItemRow, endItemRow, rowSeg1, rowSeg2, newItemNum;
-	int64_t startSegPos, endSegPos;
+	int64_t startSegPos, endSegPos, minPos, maxPos;
 	int8_t *reduFlagArray;
 
 	itemNum = *globalSegNum;
@@ -1081,25 +1081,46 @@ short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int3
 					if(i==itemNum-1)
 						endItemRow = i;
 					else if(globalSegArray[i+1].startQueryPos>endSegPos)
-						endItemRow = i;
+					{
+						if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
+							endItemRow = i;
+					}
 				}
 			}else
 			{
 				if(globalSegArray[i].startQueryPos<startSegPos)
 					startSegPos = globalSegArray[i].startQueryPos;
 
-				if(globalSegArray[i].endQueryPos>endSegPos && globalSegArray[i].endQueryPos<endSegPos+200)
-					endSegPos = globalSegArray[i].endQueryPos;
+				if(globalSegArray[i].endQueryPos>endSegPos)
+				{
+					if(globalSegArray[i].endQueryPos<endSegPos+200)
+						endSegPos = globalSegArray[i].endQueryPos;
+					else if(globalSegArray[i-1].endQueryPos>endSegPos)
+						endSegPos = globalSegArray[i-1].endQueryPos;
+				}
 
 				if(i==itemNum-1)
 					endItemRow = i;
 				else if(globalSegArray[i+1].startQueryPos>endSegPos)
-					endItemRow = i;
+				{
+					if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
+						endItemRow = i;
+				}
 			}
 
 			if(startItemRow>=0 && endItemRow>=0)
 			{
 				// get valid two large segments
+				minPos = INT_MAX;
+				maxPos = INT_MIN;
+				for(j=startItemRow; j<=endItemRow; j++)
+				{
+					if(globalSegArray[j].startQueryPos<minPos)
+						minPos = globalSegArray[j].startQueryPos;
+					if(globalSegArray[j].endQueryPos>maxPos)
+						maxPos = globalSegArray[j].endQueryPos;
+				}
+
 				rowSeg1 = rowSeg2 = -1;
 				for(j=startItemRow; j<=endItemRow; j++)
 				{
@@ -1107,15 +1128,29 @@ short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int3
 						rowSeg1 = j;
 					else if(rowSeg1==-1 && globalSegArray[j].startQueryPos==startSegPos)
 						rowSeg1 = j;
+					else if(globalSegArray[j].startQueryPos==minPos && globalSegArray[j].endQueryPos>endSegPos)
+						rowSeg1 = j;
 
 					if(globalSegArray[j].endQueryPos>endSegPos)
 						rowSeg2 = j;
 					else if(rowSeg2==-1 && globalSegArray[j].endQueryPos==endSegPos)
 						rowSeg2 = j;
+					else if(globalSegArray[j].endQueryPos==maxPos && globalSegArray[j].startQueryPos<startSegPos)
+						rowSeg2 = j;
 				}
 
 				if(rowSeg1>=0 && rowSeg2>=0)
 				{
+					if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].startSubPos==globalSegArray[rowSeg2].startSubPos)
+					{
+						if(globalSegArray[rowSeg1].matchLen<globalSegArray[rowSeg2].matchLen)
+							rowSeg1 = rowSeg2;
+					}else if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].endSubPos==globalSegArray[rowSeg2].endSubPos)
+					{
+						if(globalSegArray[rowSeg1].matchLen>globalSegArray[rowSeg2].matchLen)
+							rowSeg2 = rowSeg1;
+					}
+
 					for(j=startItemRow; j<=endItemRow; j++)
 					{
 						if(j!=rowSeg1 && j!=rowSeg2)
@@ -1383,8 +1418,10 @@ short trimAlignLeftSegEnd(globalValidSeg_t *globalSeg, char *querySeq, char *sub
 
 		if(exactMatchFlag==NO)
 		{
+			printf("LLLLLLLLLL startQueryPos=%d, endQueryPos=%d, queryAlignSeqLen=%d, subjectAlignSeqLen=%d\n", startQueryPos, endQueryPos, queryAlignSeqLen, subjectAlignSeqLen);
+
 			// generate alignment
-			if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &subjectLeftShiftLen, &queryRightShiftLen, &subjectRightShiftLen, queryAlignSeq, subjectAlignSeq, queryAlignSeqLen, subjectAlignSeqLen, NO)==FAILED)
+			if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &subjectLeftShiftLen, &queryRightShiftLen, &subjectRightShiftLen, queryAlignSeq, subjectAlignSeq, queryAlignSeqLen, subjectAlignSeqLen, YES)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot compute the alignment, error!\n", __LINE__, __func__);
 				return FAILED;
@@ -1531,8 +1568,10 @@ short trimAlignRightSegEnd(globalValidSeg_t *globalSeg, char *querySeq, char *su
 
 		if(exactMatchFlag==NO)
 		{
+			printf("RRRRRRRRRR startQueryPos=%d, endQueryPos=%d, queryAlignSeqLen=%d, subjectAlignSeqLen=%d\n", startQueryPos, endQueryPos, queryAlignSeqLen, subjectAlignSeqLen);
+
 			// generate alignment
-			if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &subjectLeftShiftLen, &queryRightShiftLen, &subjectRightShiftLen, queryAlignSeq, subjectAlignSeq, queryAlignSeqLen, subjectAlignSeqLen, NO)==FAILED)
+			if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &subjectLeftShiftLen, &queryRightShiftLen, &subjectRightShiftLen, queryAlignSeq, subjectAlignSeq, queryAlignSeqLen, subjectAlignSeqLen, YES)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot compute the alignment, error!\n", __LINE__, __func__);
 				return FAILED;

@@ -79,10 +79,12 @@ typedef struct globalValidSegNode
 // queryReadNode
 typedef struct queryReadNode
 {
-	int64_t readID;				// read ID
+	int64_t readID: 38;				// read ID
+	int64_t seqlen: 16;
+	int64_t startReadPos: 8;
+	int64_t orientation: 2;
+	int32_t alignSize;
 	int32_t queryPos;			// the query position
-	int16_t seqlen;
-	int8_t orientation;			// the read orientation
 }queryRead_t;
 
 // new querySeq
@@ -118,6 +120,8 @@ typedef struct
 
 	queryRead_t *queryReadArray;
 	int32_t queryReadNum;
+
+	uint64_t *covFlagArray;
 
 	struct misInfoNode *misInfoList, *tailMisInfo;
 	int32_t misInfoItemNum;
@@ -206,8 +210,8 @@ typedef struct readNode
 	uint64_t nBaseNum: 9;		// unknown base count: it will be changed to 'C' automatically
 	uint64_t seqlen: 10;
 	uint64_t validFlag: 1;
-	uint64_t successFlag: 1;
-	uint64_t modified: 1;
+	uint64_t successMapFlag: 1;
+	uint64_t uniqueMapFlag: 1;
 }read_t;
 
 // read block
@@ -258,10 +262,11 @@ typedef struct readMatchInfoNode
 {
 	int64_t queryID: 23;
 	int64_t queryPos: 25;			// the query position
-	int64_t matchlen: 16;
-	int64_t readID: 42;
+	int64_t alignSize: 16;
+	int64_t readID: 38;
 	int64_t seqlen: 16;
-	int64_t readOrientation: 6;
+	int64_t startReadPos: 8;
+	int64_t readOrientation: 2;
 }readMatchInfo_t;
 
 // read block
@@ -420,6 +425,9 @@ typedef struct alignMatchItemNode
 	int32_t mismatchNum: 10;
 	int32_t pairRow: 16;
 	int32_t validFlag: 3;
+	int32_t startReadPos: 8;
+	int32_t alignSize: 8;
+	int32_t fragSize: 16;
 }alignMatchItem_t;
 
 
@@ -452,7 +460,7 @@ typedef struct queryIndelNode
 	int16_t queryIndelKind, misassFlag;
 	int32_t leftMargin, rightMargin, subjectID, leftMarginSubject, rightMarginSubject;
 	int32_t pairNumLeft, discorNumLeft, pairNumRight, discorNumRight, pairNumLeftTotal, pairNumRightTotal;
-	int32_t disagreeNum, zeroCovNum, difSubject, difQuery, highCovRegNum, lowCovRegNum;
+	int32_t disagreeNum, zeroCovNum, difSubject, difQuery, highCovRegNum, lowCovRegNum, disagreeRegSize;
 	double averFragSizeLeft, averFragSizeRight, difFragSizeLeft, difFragSizeRight, discorRatioLeft, discorRatioRight;
 }queryIndel_t;
 

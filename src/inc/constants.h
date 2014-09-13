@@ -15,8 +15,8 @@
 #define NULL ((void *)0)
 #endif
 
-#define MISFINDER_VERSION_STR			("v0.4.02.01")
-#define MISFINDER_RELEASE_DATE_STR		("Aug 30, 2014")
+#define MISFINDER_VERSION_STR			("v0.4.03.01")
+#define MISFINDER_RELEASE_DATE_STR		("Sep 12, 2014")
 
 
 #define DEBUG_SCAF_OVERLAP_FLAG		(NO)
@@ -167,7 +167,7 @@
 #define GAP_SCORE						-4
 
 #define MISMATCH_WIN_SIZE				100
-#define MIS_DENSITY_THRES				0.05f
+#define MIS_DENSITY_THRES				0.1f
 
 #define DISAGREE_RATIO_THRES			0.9f
 

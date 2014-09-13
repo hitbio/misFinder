@@ -93,7 +93,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 
 		leftMargin = rightMargin - 1;
 		endQueryPosLeft = leftMargin + END_BACK_CHECK_SIZE;
-		startQueryPosLeft = endQueryPosLeft - insertSize;
+		startQueryPosLeft = leftMargin - insertSize;
 		if(startQueryPosLeft<1)
 			startQueryPosLeft = 1;
 		if(endQueryPosLeft>queryItem->queryLen)
@@ -104,10 +104,8 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		if(startQueryPosFragLeft<1)
 			startQueryPosFragLeft = 1;
 
-		//queryIndel->leftMargin = leftMargin;
-		//queryIndel->rightMargin = rightMargin;
-
 		// compute the disagreements
+		queryIndel->disagreeRegSize = endQueryPosLeft - startQueryPosLeft + 1;
 		if(computeDisagreements(&queryIndel->disagreeNum, &queryIndel->zeroCovNum, baseCovArray, startQueryPosLeft-1, endQueryPosLeft-1, NO)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the disagreements, error!\n", __LINE__, __func__);
@@ -145,7 +143,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 
 		rightMargin = leftMargin + 1;
 		startQueryPosRight = rightMargin - END_BACK_CHECK_SIZE;
-		endQueryPosRight = startQueryPosRight + insertSize;
+		endQueryPosRight = rightMargin + insertSize;
 		if(startQueryPosRight<1)
 			startQueryPosRight = 1;
 		if(endQueryPosRight>queryItem->queryLen)
@@ -156,10 +154,8 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		if(endQueryPosFragRight>queryItem->queryLen)
 			endQueryPosFragRight = queryItem->queryLen;
 
-		//queryIndel->leftMargin = leftMargin;
-		//queryIndel->rightMargin = rightMargin;
-
 		// compute the disagreements
+		queryIndel->disagreeRegSize = endQueryPosRight - startQueryPosRight + 1;
 		if(computeDisagreements(&queryIndel->disagreeNum, &queryIndel->zeroCovNum, baseCovArray, startQueryPosRight-1, endQueryPosRight-1, NO)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the disagreements, error!\n", __LINE__, __func__);
@@ -189,24 +185,20 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 	}else if((leftSeg && rightSeg) || innerFlag==YES)
 	{ // middle
 		// get the left and right region
-		//leftMargin = leftSeg->endQueryPos;
 		leftMargin = queryIndel->leftMargin;
 		endQueryPosLeft = leftMargin;
 		startQueryPosLeft = leftMargin - insertSize;
 		if(startQueryPosLeft<1)
 			startQueryPosLeft = 1;
 
-		//rightMargin = rightSeg->startQueryPos;
 		rightMargin = queryIndel->rightMargin;
 		startQueryPosRight = rightMargin;
 		endQueryPosRight = startQueryPosRight + insertSize;
 		if(endQueryPosRight>queryItem->queryLen)
 			endQueryPosRight = queryItem->queryLen;
 
-		//queryIndel->leftMargin = leftMargin;
-		//queryIndel->rightMargin = rightMargin;
-
 		// compute the disagreements
+		queryIndel->disagreeRegSize = endQueryPosRight - startQueryPosLeft + 1;
 		if(computeDisagreements(&queryIndel->disagreeNum, &queryIndel->zeroCovNum, baseCovArray, startQueryPosLeft-1, endQueryPosRight-1, NO)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the disagreements, error!\n", __LINE__, __func__);
@@ -235,13 +227,6 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 	}else // if(leftSeg==NULL && rightSeg==NULL)
 	{
-		// get the left and right region
-		//leftMargin = 1;
-		//rightMargin = queryItem->queryLen;
-
-		//queryIndel->leftMargin = leftMargin;
-		//queryIndel->rightMargin = rightMargin;
-
 		subRegSize = 500;
 		leftPos = queryIndel->leftMargin;
 		rightPos = queryIndel->rightMargin;
@@ -264,7 +249,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 
 		// compute the disagreements of ratio regions
-		if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray)==FAILED)
+		if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray, NO)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute disagreements for the ratioRegion array, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -650,12 +635,34 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) || queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
+					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+						queryIndel->misassFlag = TRUE_MISASS;
+					else if(queryIndel->disagreeNum>0)
+					{
+						if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}else
+					{
+						if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}
+				}else if(queryIndel->disagreeNum>0)
+				{
+					if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
 						queryIndel->misassFlag = TRUE_MISASS;
 					else
 						queryIndel->misassFlag = UNCERTAIN_MISASS;
 				}else
-					queryIndel->misassFlag = UNCERTAIN_MISASS;
+				{
+					if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+						queryIndel->misassFlag = TRUE_MISASS;
+					else
+						queryIndel->misassFlag = UNCERTAIN_MISASS;
+				}
 
 				//printf("dif=%.4f, difFragSize=%.4f, difAll=%.4f\n", dif, difFragSize, difAll);
 
@@ -669,12 +676,34 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) || queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->disagreeNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
+					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+						queryIndel->misassFlag = TRUE_MISASS;
+					else if(queryIndel->disagreeNum>0)
+					{
+						if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}else
+					{
+						if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}
+				}else if(queryIndel->disagreeNum>0)
+				{
+					if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
 						queryIndel->misassFlag = TRUE_MISASS;
 					else
 						queryIndel->misassFlag = UNCERTAIN_MISASS;
 				}else
-					queryIndel->misassFlag = UNCERTAIN_MISASS;
+				{
+					if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+						queryIndel->misassFlag = TRUE_MISASS;
+					else
+						queryIndel->misassFlag = UNCERTAIN_MISASS;
+				}
 
 				//printf("dif=%.4f, difFragSize=%.4f, difAll=%.4f\n", dif, difFragSize, difAll);
 
@@ -687,12 +716,34 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) || queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->disagreeNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
+					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+						queryIndel->misassFlag = TRUE_MISASS;
+					else if(queryIndel->disagreeNum>0)
+					{
+						if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}else
+					{
+						if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+							queryIndel->misassFlag = TRUE_MISASS;
+						else
+							queryIndel->misassFlag = UNCERTAIN_MISASS;
+					}
+				}else if(queryIndel->disagreeNum>0)
+				{
+					if((queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1) || (queryIndel->disagreeRegSize/queryIndel->disagreeNum<1000))
 						queryIndel->misassFlag = TRUE_MISASS;
 					else
 						queryIndel->misassFlag = UNCERTAIN_MISASS;
 				}else
-					queryIndel->misassFlag = UNCERTAIN_MISASS;
+				{
+					if(queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1)
+						queryIndel->misassFlag = TRUE_MISASS;
+					else
+						queryIndel->misassFlag = UNCERTAIN_MISASS;
+				}
 
 				//printf("dif=%.4f, difFragSize=%.4f, difAll=%.4f\n", dif, difFragSize, difAll);
 

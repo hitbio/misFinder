@@ -23,6 +23,13 @@ short getMisInfoList(query_t *queryItem, subject_t *subjectArray)
 		return FAILED;
 	}
 
+	// adjust breakpoints
+	if(adjustMisInfoList(queryItem)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot adjust the mis-assembly information list, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
 	// get the misInfo list from inner
 	if(getMisInfoListInner(queryItem, subjectArray)==FAILED)
 	{
@@ -285,6 +292,107 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 		}
 	}
 
+	return SUCCESSFUL;
+}
+
+/**
+ * Adjust the mis-assembly information list.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short adjustMisInfoList(query_t *queryItem)
+{
+	misInfo_t *misInfo, *misInfoNext, *misInfoPre;
+	queryIndel_t *queryIndel;
+	int32_t queryLen, startQPos, endQPos, mismatchNum;
+
+	queryLen = queryItem->queryLen;
+
+	// merge adjacent misjoin nodes
+	misInfo = queryItem->misInfoList;
+	while(misInfo)
+	{
+		misInfoNext = misInfo->next;
+		if(misInfo->misType==QUERY_MISJOIN_KIND && misInfoNext && misInfoNext->misType==QUERY_MISJOIN_KIND)
+		{
+			if(misInfoNext->queryMargin->rightMargin-misInfo->queryMargin->leftMargin<1000)
+			{
+				if(misInfo->queryMargin->leftMargin>misInfoNext->queryMargin->leftMargin)
+					misInfo->queryMargin->leftMargin = misInfoNext->queryMargin->leftMargin;
+
+				if(misInfo->queryMargin->rightMargin<misInfoNext->queryMargin->rightMargin)
+					misInfo->queryMargin->rightMargin = misInfoNext->queryMargin->rightMargin;
+
+				misInfo->rightSegRow = misInfoNext->rightSegRow;
+
+				free(misInfoNext->queryMargin);
+				misInfo->next = misInfoNext->next;
+				if(queryItem->tailMisInfo==misInfoNext)
+					queryItem->tailMisInfo = misInfo;
+				free(misInfoNext);
+				queryItem->misInfoItemNum --;
+
+				continue;
+			}
+		}
+
+		misInfo = misInfo->next;
+	}
+
+	// check the query ends
+	misInfo = queryItem->misInfoList;
+	misInfoPre = NULL;
+	while(misInfo)
+	{
+		if(misInfo->misType==QUERY_MISJOIN_KIND && (misInfo->queryMargin->leftMargin<1000 || misInfo->queryMargin->rightMargin<1000 || misInfo->queryMargin->leftMargin>queryLen-1000 || misInfo->queryMargin->rightMargin>queryLen-1000))
+		{
+			misInfoNext = misInfo->next;
+			free(misInfo->queryMargin);
+			if(misInfoPre==NULL)
+				queryItem->misInfoList = misInfoNext;
+			else
+				misInfoPre->next = misInfoNext;
+			if(queryItem->tailMisInfo==misInfo)
+				queryItem->tailMisInfo = misInfoPre;
+			free(misInfo);
+			misInfo = misInfoNext;
+			queryItem->misInfoItemNum --;
+
+			continue;
+		}
+
+		misInfoPre = misInfo;
+		misInfo = misInfo->next;
+	}
+/*
+	// check the indel node
+	misInfo = queryItem->misInfoList;
+	misInfoPre = NULL;
+	while(misInfo)
+	{
+		if(misInfo->misType==QUERY_INDEL_KIND)
+		{
+			queryIndel = misInfo->queryIndel;
+			if(queryIndel->leftMargin<queryIndel->rightMargin)
+			{
+				startQPos = queryIndel->leftMargin;
+				endQPos = queryIndel->rightMargin;
+			}else
+			{
+				startQPos = queryIndel->rightMargin;
+				endQPos = queryIndel->leftMargin;
+			}
+
+			// remove false indels of good alignment
+			mismatchNum
+
+
+		}
+
+		misInfoPre = misInfo;
+		misInfo = misInfo->next;
+	}
+*/
 	return SUCCESSFUL;
 }
 
@@ -1252,11 +1360,15 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 {
 	int32_t queryLen;
 	baseCov_t *baseCovArray;
-	char covFileName[256];
+	char covFileName[256], covReadsFileName[256];
 
 //	strcpy(covFileName, outputPathStr);
 //	strcat(covFileName, queryItem->queryTitle);
 //	strcat(covFileName, ".cov");
+
+//	strcpy(covReadsFileName, outputPathStr);
+//	strcat(covReadsFileName, queryItem->queryTitle);
+//	strcat(covReadsFileName, "_covReads");
 
 	queryLen = queryItem->queryLen;
 	baseCovArray = (baseCov_t *) calloc (queryLen, sizeof(baseCov_t));
@@ -1280,6 +1392,14 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 //		return FAILED;
 //	}
 
+//	if(queryItem->queryID==5 || strcmp(queryItem->queryTitle, "ctg7180000002352")==0)
+//	{
+//		if(outputCovReadsToFile(covReadsFileName, 10421, 'T', queryItem)==FAILED)
+//		{
+//			printf("line=%d, In %s(), cannot output the covered reads, error!\n", __LINE__, __func__);
+//			return FAILED;
+//		}
+//	}
 
 	// determine misjoin
 	if(computeMisjoinSingleQuery(queryItem, baseCovArray, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, insertSize, standDev)==FAILED)

@@ -28,7 +28,7 @@ short computeSVInQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 		if(queryArray[i].misassFlag==UNCERTAIN_MISASS || queryArray[i].misassFlag==TRUE_MISASS)
 		{
 			// ########################### Debug information ##############################
-			//if(queryArray[i].queryID==114 || strcmp(queryArray[i].queryTitle, "383")==0)
+			//if(queryArray[i].queryID==26 || strcmp(queryArray[i].queryTitle, "ctg7180000002423")==0)
 			//{
 			//	printf("------ queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
 			//}
@@ -186,7 +186,7 @@ short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t
  */
 short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
 {
-	int32_t leftSegRow, rightSegRow, startRegPos, endRegPos, subRegSize, ratioRegionNum, leftPos, rightPos;
+	int32_t startRegPos, endRegPos, subRegSize, ratioRegionNum, leftPos, rightPos;
 	ratioRegion_t *ratioRegionArray;
 
 	subRegSize = 500;
@@ -224,7 +224,7 @@ short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, que
 	}
 
 	// compute the disagreements of ratio regions
-	if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray)==FAILED)
+	if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute disagreements for the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -322,7 +322,7 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
 	}
 
 	// compute the disagreements of ratio regions
-	if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray)==FAILED)
+	if(computeDisagreeNumRatioRegs(ratioRegionArray, ratioRegionNum, baseCovArray, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute disagreements for the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -362,7 +362,7 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
  */
 short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioRegionNum, int32_t startQueryPos, int32_t endQueryPos, int32_t subRegSize)
 {
-	int32_t i, itemNum, startPos, endPos, midPos;
+	int32_t i, subRegSizeNew, itemNum, startPos, endPos, midPos;
 
 	*ratioRegionNum = (endQueryPos - startQueryPos) / subRegSize + 1;
 	*ratioRegionArray = (ratioRegion_t*) calloc (*ratioRegionNum, sizeof(ratioRegion_t));
@@ -371,13 +371,14 @@ short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioReg
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
+	subRegSizeNew = (endQueryPos - startQueryPos + 1) / (*ratioRegionNum) + 1;
 
 	// initialize the positions
 	itemNum = 0;
-	for(i=startQueryPos; i<=endQueryPos; i+=subRegSize)
+	for(i=0; i<(*ratioRegionNum); i++)
 	{
-		startPos = i;
-		endPos = startPos + subRegSize - 1;
+		startPos = startQueryPos + i * subRegSizeNew;
+		endPos = startPos + subRegSizeNew - 1;
 		if(endPos>endQueryPos)
 			endPos = endQueryPos;
 
@@ -411,7 +412,7 @@ short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioReg
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, baseCov_t *baseCovArray)
+short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, baseCov_t *baseCovArray, int32_t printFlag)
 {
 	int32_t i, startRow, endRow;
 
@@ -428,7 +429,7 @@ short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratio
 		else
 			endRow = ratioRegionArray[i].endQPosLHalf - 1;
 
-		if(computeDisagreements(&ratioRegionArray[i].disagreeNum, &ratioRegionArray[i].zeroCovNum, baseCovArray, startRow, endRow, NO)==FAILED)
+		if(computeDisagreements(&ratioRegionArray[i].disagreeNum, &ratioRegionArray[i].zeroCovNum, baseCovArray, startRow, endRow, printFlag)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the disagreements, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -548,9 +549,17 @@ short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegion
 		difFragSize = 0;
 	}
 
-	if(totalDisagreeNum>=1 || totalZeroCovNum>0 || discordantNum>=1 || (difFragSize>2*standDev || difFragSize>0.2*insertSize))
+	if(totalZeroCovNum>0 || discordantNum>=1 || (difFragSize>2*standDev || difFragSize>0.2*insertSize))
 		queryIndel->misassFlag = UNCERTAIN_MISASS;
-	else
+	else if(totalDisagreeNum>0)
+	{
+		if(totalDisagreeNum>=2)
+			queryIndel->misassFlag = UNCERTAIN_MISASS;
+		else if(totalDisagreeNum==1 && (endQueryPosRight-startQueryPosLeft+1)<1000)
+			queryIndel->misassFlag = UNCERTAIN_MISASS;
+		else
+			queryIndel->misassFlag = STRUCTURE_VARIATION;
+	}else
 		queryIndel->misassFlag = STRUCTURE_VARIATION;
 
 	//printf("indel reg[%d, %d]: misassFlag=%d, totalDisagreeNum=%d, totalZeroCovNum=%d, discordantNum=%d, difFragSize=%.4f\n", queryIndel->leftMargin, queryIndel->rightMargin, queryIndel->misassFlag, totalDisagreeNum, totalZeroCovNum, discordantNum, difFragSize);

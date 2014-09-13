@@ -69,8 +69,14 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 			return FAILED;
 		}
 
+		if(estimateInsertSize(&insertSize, &standDev, readSet, queryIndex)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot estimate the insert size, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
 		// align the reads to Query Index to generate reads alignment information
-		if(mapReads(queryMatchInfoSet, readSet, queryIndex)==FAILED)
+		if(mapReads(queryMatchInfoSet, readSet, queryIndex, insertSize, standDev)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot align reads to queries, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -84,7 +90,7 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 		}
 
 		// ###################### Debug information ##################
-//		if(outputQueryReadArray("../out_perga_spombe_real/alignedReads.txt", queryMatchInfoSet, readSet)==FAILED)
+//		if(outputQueryReadArray("../output_tmp/alignedReads.txt", queryMatchInfoSet, readSet)==FAILED)
 //		{
 //			printf("line=%d, In %s(), cannot output aligned reads, error!\n", __LINE__, __func__);
 //			return FAILED;
@@ -234,11 +240,11 @@ short computeMisassQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readS
 	queryArray = queryMatchInfoSet->queryArray;
 
 	// compute insert size
-	if(computeInsertSize(&insertSize, &standDev, queryMatchInfoSet, readSet)==FAILED)
-	{
-		printf("line=%d, In %s(), cannot compute insert size, error!\n", __LINE__, __func__);
-		return FAILED;
-	}
+//	if(computeInsertSize(&insertSize, &standDev, queryMatchInfoSet, readSet)==FAILED)
+//	{
+//		printf("line=%d, In %s(), cannot compute insert size, error!\n", __LINE__, __func__);
+//		return FAILED;
+//	}
 
 	// compute the S/P, S-/S, S+/S ratios in normal regions
 	if(computeNormalRatios(&SP_ratio_Thres, &SMinus_ratio_Thres, &SPlus_ratio_Thres, &discorRatio_Thres, queryMatchInfoSet, readSet, insertSize, standDev)==FAILED)
@@ -254,7 +260,7 @@ short computeMisassQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readS
 		if(queryArray[i].misassFlag==POTENTIAL_MISASS)
 		{
 			// ########################### Debug information ##############################
-			//if(queryArray[i].queryID==50 || strcmp(queryArray[i].queryTitle, "ctg7180000002358")==0)
+			//if(queryArray[i].queryID==4 || strcmp(queryArray[i].queryTitle, "ctg7180000002351")==0)
 			//{
 			//	printf("======= queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
 			//}
@@ -425,7 +431,7 @@ short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, read
  */
 short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet)
 {
-	int32_t i, j, k, startQueryRow, endQueryRow;
+	int32_t i, j, k, startQueryRow, endQueryRow, startReadRow;
 	queryRead_t *queryRead;
 
 	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
@@ -462,14 +468,20 @@ short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, rea
 			getReverseReadBaseFromPosByInt(readseq, pReadseq, pRead->seqlen, 0, pRead->seqlen);
 		}
 
+		startReadRow = queryRead->startReadPos - 1;
 		startQueryRow = queryRead->queryPos - 1;
-		endQueryRow = startQueryRow + queryRead->seqlen - 1;
+		endQueryRow = startQueryRow + queryRead->alignSize - 1;
 		if(startQueryRow<0)
 			startQueryRow = 0;
 		if(endQueryRow>queryItem->queryLen-1)
+		{
 			endQueryRow = queryItem->queryLen - 1;
 
-		for(j=startQueryRow, k=0; j<=endQueryRow; j++, k++)
+			printf("endQueryRow=%d, queryLen=%d\n", endQueryRow, queryItem->queryLen-1);
+			return FAILED;
+		}
+
+		for(j=startQueryRow, k=startReadRow; j<=endQueryRow; j++, k++)
 		{
 			switch(readseq[k])
 			{
@@ -525,13 +537,90 @@ short outputBaseCovSingleQueryToFile(char *covFileName, baseCov_t *baseCovArray,
 }
 
 /**
+ * Output the reads covering a base.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, query_t *queryItem)
+{
+	FILE *fpCovReads;
+	int32_t i, j, startQueryRow, endQueryRow, readRow;
+	queryRead_t *queryRead;
+	char orient;
+
+	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
+	readBlock_t *readBlockArray;
+	read_t *pRead;
+	readseqBlock_t *readseqBlockArray;
+	uint64_t *pReadseq;
+	char readseq[MAX_READ_LEN_IN_BUF+1];
+
+	fpCovReads = fopen(covReadsFileName, "w");
+	if(fpCovReads==NULL)
+	{
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, covReadsFileName);
+		return FAILED;
+	}
+
+	readBlockArray = readSet->readBlockArr;
+	maxItemNumPerReadBlock = readSet->maxItemNumPerReadBlock;
+	readseqBlockArray = readSet->readseqBlockArr;
+
+	if(basePos<queryItem->queryLen)
+	{
+		for(i=0; i<queryItem->queryReadNum; i++)
+		{
+			queryRead = queryItem->queryReadArray + i;
+
+			startQueryRow = queryRead->queryPos - 1;
+			endQueryRow = startQueryRow + queryRead->seqlen - 1;
+			if(startQueryRow<0)
+				startQueryRow = 0;
+			if(endQueryRow>queryItem->queryLen-1)
+				endQueryRow = queryItem->queryLen - 1;
+
+			if(startQueryRow+1<=basePos && endQueryRow+1>=basePos)
+			{
+				readBlockID = (queryRead->readID - 1) / maxItemNumPerReadBlock;
+				rowNumInReadBlock = (queryRead->readID - 1) % maxItemNumPerReadBlock;
+				pRead = readBlockArray[readBlockID].readArr + rowNumInReadBlock;
+				pReadseq = readseqBlockArray[pRead->readseqBlockID-1].readseqArr + pRead->rowReadseqInBlock;
+
+				if(queryRead->orientation==ORIENTATION_PLUS)
+					getReadBaseFromPosByInt(readseq, pReadseq, pRead->seqlen, 0, pRead->seqlen);
+				else
+					getReverseReadBaseFromPosByInt(readseq, pReadseq, pRead->seqlen, 0, pRead->seqlen);
+
+				readRow = basePos - startQueryRow - 1;
+				if(readseq[readRow]==base)
+				{
+					if(queryRead->orientation==ORIENTATION_PLUS)
+						orient = '+';
+					else
+						orient = '-';
+					fprintf(fpCovReads, "%ld\t%d\t%c\t%d\t%s\n", queryRead->readID, queryRead->queryPos, orient, readRow, readseq);
+				}
+			}
+		}
+	}else
+	{
+		printf("line=%d, In %s(), basePos=%d, queryLen=%d, error!\n", __LINE__, __func__, basePos, queryItem->queryLen);
+		return FAILED;
+	}
+
+	fclose(fpCovReads);
+
+	return SUCCESSFUL;
+}
+
+/**
  * Compute the disagreements of query.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
 short computeDisagreements(int32_t *disagreeNum, int32_t *zeroCovNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t printFlag)
 {
-	int32_t i, j, maxID, maxValue, total;
+	int32_t i, j, maxID, maxValue, secID, secValue, total, disagreeFlag;
 	double maxRatio;
 
 	if(printFlag==YES)
@@ -544,33 +633,48 @@ short computeDisagreements(int32_t *disagreeNum, int32_t *zeroCovNum, baseCov_t 
 	*zeroCovNum = 0;
 	for(i=startRow; i<=endRow; i++)
 	{
+		disagreeFlag = NO;
 		if(baseCovArray[i].baseNumArray[5]>0)
 		{
-			maxID = -1;
-			maxValue = 0;
+			maxID = secID = -1;
+			maxValue = secValue = 0;
 			total = baseCovArray[i].baseNumArray[5];
 			for(j=0; j<5; j++)
 			{
 				if(baseCovArray[i].baseNumArray[j]>maxValue)
 				{
+					secValue = maxValue;
+					secID = maxID;
 					maxValue = baseCovArray[i].baseNumArray[j];
 					maxID = j;
+				}else if(baseCovArray[i].baseNumArray[j]>secValue)
+				{
+					secValue = baseCovArray[i].baseNumArray[j];
+					secID = j;
 				}
 			}
 
 			maxRatio = (double)maxValue / total;
 			if(maxRatio<DISAGREE_RATIO_THRES)
 			{
-				if(printFlag==YES)
-					printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", i+1, baseCovArray[i].baseNumArray[5], baseCovArray[i].baseNumArray[0], baseCovArray[i].baseNumArray[1], baseCovArray[i].baseNumArray[2], baseCovArray[i].baseNumArray[3], baseCovArray[i].baseNumArray[4], maxRatio);
-				(*disagreeNum) ++;
+				disagreeFlag = YES;
+				if(secValue==1 && maxValue>=4)
+					disagreeFlag = NO;
 			}
 		}else
 		{
+			maxRatio = 0;
+			disagreeFlag = YES;
+		}
+
+		if(disagreeFlag==YES)
+		{
 			if(printFlag==YES)
-				printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", i+1, baseCovArray[i].baseNumArray[5], baseCovArray[i].baseNumArray[0], baseCovArray[i].baseNumArray[1], baseCovArray[i].baseNumArray[2], baseCovArray[i].baseNumArray[3], baseCovArray[i].baseNumArray[4], 0.0f);
+				printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", i+1, baseCovArray[i].baseNumArray[5], baseCovArray[i].baseNumArray[0], baseCovArray[i].baseNumArray[1], baseCovArray[i].baseNumArray[2], baseCovArray[i].baseNumArray[3], baseCovArray[i].baseNumArray[4], maxRatio);
 			(*disagreeNum) ++;
-			(*zeroCovNum) ++;
+
+			if(baseCovArray[i].baseNumArray[5]==0)
+				(*zeroCovNum) ++;
 		}
 	}
 
@@ -594,6 +698,12 @@ short computeAbnormalCovRegNum(int32_t *highCovRegNum, int32_t *lowCovRegNum, ba
 	int64_t i, j, baseNumReg, baseNumTotal;
 	double covReg, covTotal;
 	int32_t subRegSize, newStartRow, newEndRow, tmp;
+
+	if(startRow<500 || endRow>arraySize-500)
+	{
+		*highCovRegNum = *lowCovRegNum = 0;
+		return SUCCESSFUL;
+	}
 
 	subRegSize = 50;
 
@@ -1190,8 +1300,6 @@ short reverseSeq(char *seq, int32_t seqLen)
 			case 'C': seq[i] = 'G'; break;
 			case 'G': seq[i] = 'C'; break;
 			case 'T': seq[i] = 'A'; break;
-			default: printf("line=%d, In %s(), error sequence [ %s ], error!\n", __LINE__, __func__, seq);
-					return FAILED;
 		}
 	}
 
@@ -1483,84 +1591,85 @@ short computeRightMargin(int64_t *rightMargin, int64_t *rightMarginSubject, char
 	else
 		subjectPosShiftFactor = -1;
 
-	if(marginBlockID==-1)
-	{
-		startRow = overlapLen - winSize;
-		endRow = overlapLen - 1;
-		if(startRow<0)
-			startRow = 0;
-		targetRow = -1;
-		for(i=startRow; i<=endRow; i++)
-		{
-			if(pMatchSeq[i]!='|')
-			{
-				for(j=i-1; j>=0; j--)
-				{
-					if(pMatchSeq[j]=='|')
-					{
-						targetRow = j;
-						break;
-					}
-				}
-
-				if(targetRow>=0)
-					break;
-			}
-		}
-		if(targetRow<0)
-		{
-			if(i>endRow)
-				targetRow = endRow;
-			else
-			{
-				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
-				return FAILED;
-			}
-		}
-
-		// get the query position
-		gapNum = 0;
-		pQueryMatchSeq = alignResultArray[0];
-		for(i=0; i<=targetRow; i++)
-		{
-			if(pQueryMatchSeq[i]=='-')
-				gapNum ++;
-		}
-		newRightQueryPos = leftQueryPos + queryLeftShiftLen + targetRow - gapNum;
-
-		// get the subject position
-		gapNum = 0;
-		pSubjectMatchSeq = alignResultArray[2];
-		for(i=0; i<=targetRow; i++)
-		{
-			if(pSubjectMatchSeq[i]=='-')
-				gapNum ++;
-		}
-		newRightSubjectPos = leftSubjectPos + (subjectLeftShiftLen + targetRow - gapNum) * subjectPosShiftFactor;
-
-		// compute the mismatchNumTrimmed, gapNumTrimmed
-		mismatchNumTrimmed = gapNumTrimmed = 0;
-		for(i=targetRow+1; i<overlapLen; i++)
-		{
-			if(alignResultArray[1][i]!='|')
-			{
-				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
-					gapNumTrimmed ++;
-				mismatchNumTrimmed ++;
-			}
-		}
-
-		globalSeg->endQueryPos = newRightQueryPos;
-		globalSeg->endSubPos = newRightSubjectPos;
-		globalSeg->matchLen -= overlapLen - 1 - targetRow - mismatchNumTrimmed;
-		globalSeg->totalMatchLen -= overlapLen - 1 - targetRow;
-		if(globalSeg->matchLen>globalSeg->totalMatchLen)
-			globalSeg->matchLen = globalSeg->totalMatchLen;
-		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
-		globalSeg->gapNum -= gapNumTrimmed;
-		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
-			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
-	}else
+//	if(marginBlockID==-1)
+//	{
+//		startRow = overlapLen - winSize;
+//		endRow = overlapLen - 1;
+//		if(startRow<0)
+//			startRow = 0;
+//		targetRow = -1;
+//		for(i=startRow; i<=endRow; i++)
+//		{
+//			if(pMatchSeq[i]!='|')
+//			{
+//				for(j=i-1; j>=0; j--)
+//				{
+//					if(pMatchSeq[j]=='|')
+//					{
+//						targetRow = j;
+//						break;
+//					}
+//				}
+//
+//				if(targetRow>=0)
+//					break;
+//			}
+//		}
+//		if(targetRow<0)
+//		{
+//			if(i>endRow)
+//				targetRow = endRow;
+//			else
+//			{
+//				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
+//				return FAILED;
+//			}
+//		}
+//
+//		// get the query position
+//		gapNum = 0;
+//		pQueryMatchSeq = alignResultArray[0];
+//		for(i=0; i<=targetRow; i++)
+//		{
+//			if(pQueryMatchSeq[i]=='-')
+//				gapNum ++;
+//		}
+//		newRightQueryPos = leftQueryPos + queryLeftShiftLen + targetRow - gapNum;
+//
+//		// get the subject position
+//		gapNum = 0;
+//		pSubjectMatchSeq = alignResultArray[2];
+//		for(i=0; i<=targetRow; i++)
+//		{
+//			if(pSubjectMatchSeq[i]=='-')
+//				gapNum ++;
+//		}
+//		newRightSubjectPos = leftSubjectPos + (subjectLeftShiftLen + targetRow - gapNum) * subjectPosShiftFactor;
+//
+//		// compute the mismatchNumTrimmed, gapNumTrimmed
+//		mismatchNumTrimmed = gapNumTrimmed = 0;
+//		for(i=targetRow+1; i<overlapLen; i++)
+//		{
+//			if(alignResultArray[1][i]!='|')
+//			{
+//				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
+//					gapNumTrimmed ++;
+//				mismatchNumTrimmed ++;
+//			}
+//		}
+//
+//		globalSeg->endQueryPos = newRightQueryPos;
+//		globalSeg->endSubPos = newRightSubjectPos;
+//		globalSeg->matchLen -= overlapLen - 1 - targetRow - mismatchNumTrimmed;
+//		globalSeg->totalMatchLen -= overlapLen - 1 - targetRow;
+//		if(globalSeg->matchLen>globalSeg->totalMatchLen)
+//			globalSeg->matchLen = globalSeg->totalMatchLen;
+//		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
+//		globalSeg->gapNum -= gapNumTrimmed;
+//		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
+//			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
+//	}else
+	if(marginBlockID>=0)
 	{
 		startRow = (marginBlockID - 1) * winSize;
 		endRow = startRow + 2 * winSize - 1;
@@ -1639,6 +1748,10 @@ short computeRightMargin(int64_t *rightMargin, int64_t *rightMarginSubject, char
 		globalSeg->gapNum -= gapNumTrimmed;
 		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
 			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
+	}else
+	{
+		newRightQueryPos = globalSeg->endQueryPos;
+		newRightSubjectPos = globalSeg->endSubPos;
 	}
 
 	if(newRightQueryPos==-1)
@@ -1735,83 +1848,84 @@ short computeLeftMargin(int64_t *leftMargin, int64_t *leftMarginSubject, char **
 	else
 		subjectPosShiftFactor = -1;
 
-	if(marginBlockID==-1)
-	{
-		startRow = winSize - 1;
-		endRow = 0;
-		if(startRow>overlapLen-1)
-			startRow = overlapLen - 1;
-		targetRow = -1;
-		for(i=startRow; i>=endRow; i--)
-		{
-			if(pMatchSeq[i]!='|')
-			{
-				for(j=i+1; j<overlapLen; j++)
-				{
-					if(pMatchSeq[j]=='|')
-					{
-						targetRow = j;
-						break;
-					}
-				}
-				if(targetRow>=0)
-					break;
-			}
-		}
-		if(targetRow<0)
-		{
-			if(i<endRow)
-				targetRow = endRow;
-			else
-			{
-				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
-				return FAILED;
-			}
-		}
-
-		// get the query position
-		gapNum = 0;
-		pQueryMatchSeq = alignResultArray[0];
-		for(i=overlapLen-1; i>=targetRow; i--)
-		{
-			if(pQueryMatchSeq[i]=='-')
-				gapNum ++;
-		}
-		newLeftQueryPos = rightQueryPos - (overlapLen-1+queryRightShiftLen-targetRow) + gapNum;
-
-		// get the subject position
-		gapNum = 0;
-		pSubjectMatchSeq = alignResultArray[2];
-		for(i=overlapLen-1; i>=targetRow; i--)
-		{
-			if(pSubjectMatchSeq[i]=='-')
-				gapNum ++;
-		}
-		newLeftSubjectPos = rightSubjectPos - (overlapLen-1 + subjectRightShiftLen - targetRow - gapNum) * subjectPosShiftFactor;
-
-		// compute the mismatchNumTrimmed, gapNumTrimmed
-		mismatchNumTrimmed = gapNumTrimmed = 0;
-		for(i=0; i<targetRow; i++)
-		{
-			if(alignResultArray[1][i]!='|')
-			{
-				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
-					gapNumTrimmed ++;
-				mismatchNumTrimmed ++;
-			}
-		}
-
-		globalSeg->startQueryPos = newLeftQueryPos;
-		globalSeg->startSubPos = newLeftSubjectPos;
-		globalSeg->matchLen -= targetRow - mismatchNumTrimmed;
-		globalSeg->totalMatchLen -= targetRow;
-		if(globalSeg->matchLen>globalSeg->totalMatchLen)
-			globalSeg->matchLen = globalSeg->totalMatchLen;
-		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
-		globalSeg->gapNum -= gapNumTrimmed;
-		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
-			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
-	}else
+//	if(marginBlockID==-1)
+//	{
+//		startRow = winSize - 1;
+//		endRow = 0;
+//		if(startRow>overlapLen-1)
+//			startRow = overlapLen - 1;
+//		targetRow = -1;
+//		for(i=startRow; i>=endRow; i--)
+//		{
+//			if(pMatchSeq[i]!='|')
+//			{
+//				for(j=i+1; j<overlapLen; j++)
+//				{
+//					if(pMatchSeq[j]=='|')
+//					{
+//						targetRow = j;
+//						break;
+//					}
+//				}
+//				if(targetRow>=0)
+//					break;
+//			}
+//		}
+//		if(targetRow<0)
+//		{
+//			if(i<endRow)
+//				targetRow = endRow;
+//			else
+//			{
+//				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
+//				return FAILED;
+//			}
+//		}
+//
+//		// get the query position
+//		gapNum = 0;
+//		pQueryMatchSeq = alignResultArray[0];
+//		for(i=overlapLen-1; i>=targetRow; i--)
+//		{
+//			if(pQueryMatchSeq[i]=='-')
+//				gapNum ++;
+//		}
+//		newLeftQueryPos = rightQueryPos - (overlapLen-1+queryRightShiftLen-targetRow) + gapNum;
+//
+//		// get the subject position
+//		gapNum = 0;
+//		pSubjectMatchSeq = alignResultArray[2];
+//		for(i=overlapLen-1; i>=targetRow; i--)
+//		{
+//			if(pSubjectMatchSeq[i]=='-')
+//				gapNum ++;
+//		}
+//		newLeftSubjectPos = rightSubjectPos - (overlapLen-1 + subjectRightShiftLen - targetRow - gapNum) * subjectPosShiftFactor;
+//
+//		// compute the mismatchNumTrimmed, gapNumTrimmed
+//		mismatchNumTrimmed = gapNumTrimmed = 0;
+//		for(i=0; i<targetRow; i++)
+//		{
+//			if(alignResultArray[1][i]!='|')
+//			{
+//				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
+//					gapNumTrimmed ++;
+//				mismatchNumTrimmed ++;
+//			}
+//		}
+//
+//		globalSeg->startQueryPos = newLeftQueryPos;
+//		globalSeg->startSubPos = newLeftSubjectPos;
+//		globalSeg->matchLen -= targetRow - mismatchNumTrimmed;
+//		globalSeg->totalMatchLen -= targetRow;
+//		if(globalSeg->matchLen>globalSeg->totalMatchLen)
+//			globalSeg->matchLen = globalSeg->totalMatchLen;
+//		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
+//		globalSeg->gapNum -= gapNumTrimmed;
+//		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
+//			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
+//	}else
+	if(marginBlockID>=0)
 	{
 		startRow = overlapLen - 1 - (marginBlockID - 1) * winSize;
 		endRow = startRow - 2 * winSize + 1;
@@ -1889,6 +2003,10 @@ short computeLeftMargin(int64_t *leftMargin, int64_t *leftMarginSubject, char **
 		globalSeg->gapNum -= gapNumTrimmed;
 		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
 			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
+	}else
+	{
+		newLeftQueryPos = globalSeg->startQueryPos;
+		newLeftSubjectPos = globalSeg->startSubPos;
 	}
 
 	if(newLeftQueryPos==-1)
@@ -2626,7 +2744,9 @@ short determineMisassFlag(query_t *queryItem, int32_t misjoinRegNum, baseCov_t *
 					return FAILED;
 				}
 
-				if(queryMargin->zeroCovNum>3 || ((queryMargin->disagreeNum>=2 || queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3) && (queryMargin->SPRatio>SP_ratio_Thres*3 || (queryMargin->singleMinusRatio>0.7 && queryMargin->singlePlusRatio>0.7) || (queryMargin->discorNum>=3 && queryMargin->discorRatio>0.1))))
+				if(queryMargin->zeroCovNum>3 || ((queryMargin->disagreeNum>=2 || queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3) && (queryMargin->SPRatio>SP_ratio_Thres*3 || (queryMargin->singleMinusRatio>0.7 || queryMargin->singlePlusRatio>0.7) || (queryMargin->discorNum>=3 && queryMargin->discorRatio>0.1))))
+					misInfo->misassFlag = queryMargin->misassFlag = TRUE_MISASS;
+				else if(queryMargin->disagreeNum>=2 && (queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3))
 					misInfo->misassFlag = queryMargin->misassFlag = TRUE_MISASS;
 				else
 					misInfo->misassFlag = queryMargin->misassFlag = UNCERTAIN_MISASS;
@@ -2651,7 +2771,7 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 	misassSeq_t *misassSeq;
 	char misKindStr[256], *subjectTitle, nullSubjectTitle[256];
 	FILE *fpErrors, *fpSV, *fpUncertain, *fpGap;
-	int32_t i, subjectID;
+	int32_t i, subjectID, errNum, svNum, gapNum, warningNum;
 	subject_t *subjectArray;
 
 	fpErrors = fopen(errorsFile, "w");
@@ -2690,6 +2810,7 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 	subjectArray = queryMatchInfoSet->subjectArray;
 	strcpy(nullSubjectTitle, "-");
 
+	errNum = svNum = gapNum = warningNum = 0;
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		queryItem = queryMatchInfoSet->queryArray + i;
@@ -2719,6 +2840,7 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 							}
 
 							fprintf(fpErrors, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", queryItem->queryTitle, misKindStr, misassSeq->startQueryPos, misassSeq->endQueryPos, misassSeq->startSubjectPos, misassSeq->endSubjectPos, subjectTitle);
+							errNum ++;
 						}else if(misInfo->gapFlag==YES)
 						{
 							switch(misassSeq->misassKind)
@@ -2729,6 +2851,7 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 							}
 
 							fprintf(fpGap, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", queryItem->queryTitle, misKindStr, misassSeq->startQueryPos, misassSeq->endQueryPos, misassSeq->startSubjectPos, misassSeq->endSubjectPos, subjectTitle);
+							gapNum ++;
 						}else
 						{
 							printf("line=%d, In %s(), invalid situation, error!\n", __LINE__, __func__);
@@ -2746,11 +2869,13 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 						}
 
 						fprintf(fpSV, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", queryItem->queryTitle, misKindStr, misassSeq->startQueryPos, misassSeq->endQueryPos, misassSeq->startSubjectPos, misassSeq->endSubjectPos, subjectTitle);
+						svNum ++;
 					}else if(misInfo->misassFlag==UNCERTAIN_MISASS)
 					{
 						strcpy(misKindStr, "uncertain");
 
 						fprintf(fpUncertain, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", queryItem->queryTitle, misKindStr, misassSeq->startQueryPos, misassSeq->endQueryPos, misassSeq->startSubjectPos, misassSeq->endSubjectPos, subjectTitle);
+						warningNum ++;
 					}else
 					{
 						printf("line=%d, In %s(), invalid misassFlag=%d, error!\n", __LINE__, __func__, misInfo->misassFlag);
@@ -2764,6 +2889,12 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 			}
 		}
 	}
+
+	printf("**** In summary, the statistics are as follows ****\n");
+	printf("Number of mis-assemblies                : %d\n", errNum);
+	printf("Number of correct assemblies due to SVs : %d\n", svNum);
+	printf("Number of mis-assemblies in gap regions : %d\n", gapNum);
+	printf("Number of warnings                      : %d\n", warningNum);
 
 	fclose(fpErrors);
 	fclose(fpSV);

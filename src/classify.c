@@ -29,7 +29,7 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-		//if(queryMatchInfoSet->queryArray[i].queryID==377 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "444")==0)
+		//if(queryMatchInfoSet->queryArray[i].queryID==32 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "ctg7180000002387")==0)
 		//{
 		//	printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
 		//}
@@ -1460,8 +1460,8 @@ short determineBestQuerySubjectItem(query_t *pQuery)
 			pQuery->circularFlag = pQuerySubjectArray[maxSubjectIndex].circularFlag;
 		}else
 		{
-			printf("line=%d, In %s(), maxSubjectIndex=%d, error!\n", __LINE__, __func__, maxSubjectIndex);
-			return FAILED;
+			pQuery->bestMatchRow = -1;
+			pQuery->circularFlag = NO;
 		}
 	}
 

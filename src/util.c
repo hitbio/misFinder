@@ -211,11 +211,11 @@ short outputReadseqInReadset(char *outfile, readSet_t *readSet)
 					printf("line=%d, In %s(), cannot get the read base sequence, error!\n", __LINE__, __func__);
 					return FAILED;
 				}
-				fprintf(fpOut, "rid=%ld, seqlen=%d, nBaseNum=%d, validFlag=%d, successFlag=%d, seq=%s\n", rid, (int32_t)pRead->seqlen, (int32_t)pRead->nBaseNum, (int32_t)pRead->validFlag, (int32_t)pRead->successFlag, readBaseSeq);
+				fprintf(fpOut, "rid=%ld, seqlen=%d, nBaseNum=%d, validFlag=%d, successMapFlag=%d, uniqueMapFlag=%d, seq=%s\n", rid, (int32_t)pRead->seqlen, (int32_t)pRead->nBaseNum, (int32_t)pRead->validFlag, (int32_t)pRead->successMapFlag, (int32_t)pRead->uniqueMapFlag, readBaseSeq);
 			}else
 			{
 
-				fprintf(fpOut, "rid=%ld, seqlen=%d, nBaseNum=%d, validFlag=%d, successFlag=%d, seq=NNNN...NNNN\n", rid, (int32_t)pRead->seqlen, (int32_t)pRead->nBaseNum, (int32_t)pRead->validFlag, (int32_t)pRead->successFlag);
+				fprintf(fpOut, "rid=%ld, seqlen=%d, nBaseNum=%d, validFlag=%d, successMapFlag=%d, uniqueMapFlag=%d, seq=NNNN...NNNN\n", rid, (int32_t)pRead->seqlen, (int32_t)pRead->nBaseNum, (int32_t)pRead->validFlag, (int32_t)pRead->successMapFlag, (int32_t)pRead->uniqueMapFlag);
 			}
 		}
 	}
@@ -276,6 +276,36 @@ short outputGapRegInQueries(queryMatchInfo_t *queryMatchInfoSet)
 	}
 
 	fclose(fpGapInfo);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Output the gaps in queries.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short outputMatchResults(alignMatchItem_t *matchResultArray, int32_t itemNum)
+{
+	int32_t i;
+	char orientCh;
+
+	if(itemNum>0)
+	{
+		printf("Match items: %d\n", itemNum);
+		for(i=0; i<itemNum; i++)
+		{
+			if(matchResultArray[i].orientation==ORIENTATION_PLUS)
+				orientCh = '+';
+			else
+				orientCh = '-';
+
+			printf("queryID=%d, queryPos=%d, orient=%c, mismatchNum=%d, startReadPos=%d, alignSize=%d, fragSize=%d\n", matchResultArray[i].queryID, matchResultArray[i].queryPos, orientCh, (int32_t)matchResultArray[i].mismatchNum, (int32_t)matchResultArray[i].startReadPos, (int32_t)matchResultArray[i].alignSize, (int32_t)matchResultArray[i].fragSize);
+		}
+	}else
+	{
+		printf("There is no match item.\n");
+	}
 
 	return SUCCESSFUL;
 }

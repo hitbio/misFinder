@@ -55,11 +55,6 @@ short parseCommandParasAndExe(int argc, char **argv)
 	double minIdentityPercentPara;
 	int32_t readFileNumPara, pairedModePara, indelSizeThresPara;
 
-
-	// version information
-	printf("misFinder: %s\n", MISFINDER_VERSION_STR);
-	printf("Released : %s\n\n", MISFINDER_RELEASE_DATE_STR);
-
 	if(argc==1)
 	{
 		if(showUsageInfo()==FAILED)
@@ -458,6 +453,10 @@ short parseCommandParasAndExe(int argc, char **argv)
  */
 short showUsageInfo()
 {
+	// version information
+	printf("misFinder: %s\n", MISFINDER_VERSION_STR);
+	printf("Released : %s\n", MISFINDER_RELEASE_DATE_STR);
+
 	printf("\nUsage: mf <command> [option]\n");
 	printf("    merge       merge multiple subjects into a multi-fasta format file\n");
 	printf("    metrics     compute the metrics\n");

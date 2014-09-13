@@ -190,6 +190,7 @@ short computeInsertSize(double *insertSize, double *standDev, queryMatchInfo_t *
 short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double insertSize, double standDev);
 short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet);
 short outputBaseCovSingleQueryToFile(char *covFileName, baseCov_t *baseCovArray, int32_t arraySize);
+short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, query_t *queryItem);
 short computeDisagreements(int32_t *disagreeNum, int32_t *zeroCovNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t printFlag);
 short computeAbnormalCovRegNum(int32_t *highCovRegNum, int32_t *lowCovRegNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t arraySize, int32_t skipEndFlag);
 short computeMisassFlagAlignSeg(int32_t *misassFlag, globalValidSeg_t *leftAlignSeg, globalValidSeg_t *rightAlignSeg, int32_t subjectLen, int32_t circularFlag);
@@ -240,14 +241,22 @@ short getKmerBaseByInt(char *baseSeq, uint64_t *kmerSeqInt, int32_t entriesPerKm
 short fillQueries(queryMatchInfo_t *queryMatchInfoSet, char *inputQueryFile);
 
 // ================= map.c ====================
-short mapReads(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex);
+short mapReads(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex, double insertSize, double standDev);
+short initCovFlagArray(queryMatchInfo_t *queryMatchInfoSet);
+void freeCovFlagArray(queryMatchInfo_t *queryMatchInfoSet);
+short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex, double insertSize, double standDev, int32_t uniqueMapOpFlag);
 short getMaxArraySizeFromQueryIndex(int32_t *maxArraySize, queryIndex_t *queryIndex);
+short estimateInsertSize(double *insertSize, double *standDev, readSet_t *readSet, queryIndex_t *queryIndex);
 short mapSingleReadToQueries(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
 short mapSingleReadToQueriesPerfect(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex);
 short getMatchedQueryPosPerfect(alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, queryIndex_t *queryIndex);
 short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
 short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
-short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t *matchItemNum1, int32_t *matchItemNum2);
+short isProcessedMatchItem(int32_t *processedFlag, int32_t startAlignQueryPos, int32_t startBasePos, alignMatchItem_t *matchResultArray, int32_t matchItemNum);
+short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t *matchItemNum1, int32_t *matchItemNum2, int32_t seqLen1, int32_t seqLen2, double insertSize, double standDev, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet);
+short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *alignMatchItem, queryMatchInfo_t *queryMatchInfoSet);
+short selectBestAlignInfoSingleRead(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet);
+short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *alignMatchItem);
 short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t startReadPos, int32_t kmerSize, int32_t entriesNum, int32_t baseNumLastEntry);
 short getRowRangeMatchArray(int32_t *startRow, int32_t *endRow, alignMatchItem_t *matchResultArray, int32_t arraySize, int32_t queryID);
 short fillReadMatchInfoQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
@@ -275,7 +284,7 @@ short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t
 short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev);
 short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev);
 short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioRegionNum, int32_t startQueryPos, int32_t endQueryPos, int32_t subRegSize);
-short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, baseCov_t *baseCovArray);
+short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, baseCov_t *baseCovArray, int32_t printFlag);
 short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem);
 short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem);
 short computeTotalDisagreeNum(int32_t *totalDisagreeNum, int32_t *totalZeroCovNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum);
@@ -284,6 +293,7 @@ short getDiscordantRegNum(int32_t *discordantNum, ratioRegion_t *ratioRegionArra
 // ================= misinfo.c ====================
 short getMisInfoList(query_t *queryItem, subject_t *subjectArray);
 short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray);
+short adjustMisInfoList(query_t *queryItem);
 short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray);
 short computeStartAlignPos(int32_t *startAlignPosQuery, int32_t *startAlignPosSubject, int32_t startQueryPos, int32_t startSubjectPos, globalValidSeg_t *globalSeg, char *querySeq, char *subjectSeq, int32_t initAlignSize);
 short initAlignBuf(char **alignResultArray, char **alignSeq1, char **alignSeq2, int32_t maxSeqLen);
@@ -328,5 +338,6 @@ short outputQueryMatchInfoText(char *tmpQueryMatchFile, query_t *queryArray, mat
 short checkRefCoveredRatio(metrics_t *queryMetrics, subject_t *subjectArray, int64_t itemNumSubjectArray, query_t *queryArray, int64_t itemNumQueryArray);
 short outputReadseqInReadset(char *outfile, readSet_t *readSet);
 short outputGapRegInQueries(queryMatchInfo_t *queryMatchInfoSet);
+short outputMatchResults(alignMatchItem_t *matchResultArray, int32_t itemNum);
 
 #endif /* METHODS_H_ */

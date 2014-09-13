@@ -1040,7 +1040,8 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
 	pReadTmpDoing->seqlen = seqLen;
 	pReadTmpDoing->nBaseNum = unknownBaseNum;
 	pReadTmpDoing->validFlag = validFlag;
-	pReadTmpDoing->modified = NO;
+	pReadTmpDoing->successMapFlag = NO;
+	pReadTmpDoing->uniqueMapFlag = NO;
 	pReadBlockTmp->itemNum ++;
 	readSet->totalItemNumRead ++;
 	if(validFlag==YES)
