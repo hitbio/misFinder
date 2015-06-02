@@ -14,43 +14,46 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short queryLenStatistics(metrics_t *queryMetrics, char *sortedQueryFile)
+short queryLenStatistics(metrics_t *queryMetrics, queryMatchInfo_t *queryMatchInfoSet, char *sortedQueryFile)
 {
+	queryLenStatistic_t *lenStatisticArray, *lenStatisitcBufArray;
+	int64_t itemNumLenStatisticArray;
+
 	// initialize the memory
-	if(initMemLenStatistics()==FAILED)
+	if(initMemLenStatistics(&lenStatisticArray, &lenStatisitcBufArray, &itemNumLenStatisticArray, queryMatchInfoSet->itemNumQueryArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the memory for query statistics, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	// fill the data for queryLenStatisticArr
-	if(fillQueryDataLenStatistic(&lenStatisticArr, &itemNumLenStatisticArr, queryMatchInfoSet->queryArray, queryMatchInfoSet->itemNumQueryArray)==FAILED)
+	// fill the data for queryLenStatisticArray
+	if(fillQueryDataLenStatistic(lenStatisticArray, itemNumLenStatisticArray, queryMatchInfoSet->queryArray, queryMatchInfoSet->itemNumQueryArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the query data for statistics, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// sort the queries according to their lengths
-	if(radixSortOfLengths(lenStatisticArr, lenStatisitcBufArr, itemNumLenStatisticArr)==FAILED)
+	if(radixSortOfLengths(lenStatisticArray, lenStatisitcBufArray, itemNumLenStatisticArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot sort the queries according to their lenghts, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	if(saveSortedQueries(sortedQueryFile, lenStatisticArr, itemNumLenStatisticArr, queryMatchInfoSet->queryArray)==FAILED)
+	if(saveSortedQueries(sortedQueryFile, lenStatisticArray, itemNumLenStatisticArray, queryMatchInfoSet->queryArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot output the sorted queries to file, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// get the maxSize, N50, mean size, median size
-	if(computeLenStatistics(queryMetrics, lenStatisticArr, itemNumLenStatisticArr)==FAILED)
+	if(computeLenStatisticsQueryMetrics(queryMetrics, lenStatisticArray, itemNumLenStatisticArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the statistics of queries, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	freeMemLenStatistics();
+	freeMemLenStatistics(&lenStatisticArray, &lenStatisitcBufArray);
 
 	return SUCCESSFUL;
 }
@@ -60,17 +63,17 @@ short queryLenStatistics(metrics_t *queryMetrics, char *sortedQueryFile)
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short initMemLenStatistics()
+short initMemLenStatistics(queryLenStatistic_t **lenStatisticArray, queryLenStatistic_t **lenStatisitcBufArray, int64_t *itemNumLenStatisticArray, int64_t itemNum)
 {
-	maxItemNumLenStatisticArr = queryMatchInfoSet->itemNumQueryArray;
-	lenStatisticArr = (queryLenStatistic_t *) calloc (maxItemNumLenStatisticArr, sizeof(queryLenStatistic_t));
-	if(lenStatisticArr==NULL)
+	*itemNumLenStatisticArray = itemNum;
+	*lenStatisticArray = (queryLenStatistic_t *) calloc (*itemNumLenStatisticArray, sizeof(queryLenStatistic_t));
+	if((*lenStatisticArray)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
-	lenStatisitcBufArr = (queryLenStatistic_t *) calloc (maxItemNumLenStatisticArr, sizeof(queryLenStatistic_t));
-	if(lenStatisitcBufArr==NULL)
+	*lenStatisitcBufArray = (queryLenStatistic_t *) calloc (*itemNumLenStatisticArray, sizeof(queryLenStatistic_t));
+	if((*lenStatisitcBufArray)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -82,15 +85,12 @@ short initMemLenStatistics()
 /**
  * Free the statistics memory.
  */
-void freeMemLenStatistics()
+void freeMemLenStatistics(queryLenStatistic_t **lenStatisticArray, queryLenStatistic_t **lenStatisitcBufArray)
 {
-	itemNumLenStatisticArr =0;
-	maxItemNumLenStatisticArr = 0;
-
-	free(lenStatisticArr);
-	lenStatisticArr = NULL;
-	free(lenStatisitcBufArr);
-	lenStatisitcBufArr = NULL;
+	free(*lenStatisticArray);
+	*lenStatisticArray = NULL;
+	free(*lenStatisitcBufArray);
+	*lenStatisitcBufArray = NULL;
 }
 
 /**
@@ -98,16 +98,22 @@ void freeMemLenStatistics()
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short fillQueryDataLenStatistic(queryLenStatistic_t **lenStatisticArray, int64_t *itemNumLenStatisticArray, query_t *queryArray, int64_t itemNumQueryArray)
+short fillQueryDataLenStatistic(queryLenStatistic_t *lenStatisticArray, int64_t itemNumLenStatisticArray, query_t *queryArray, int64_t itemNumQueryArray)
 {
-	int64_t i;
+	int64_t i, itemNum;
 
-	*itemNumLenStatisticArray = 0;
+	itemNum = 0;
 	for(i=0; i<itemNumQueryArray; i++)
 	{
-		lenStatisticArr[*itemNumLenStatisticArray].queryID = queryArray[i].queryID;
-		lenStatisticArr[*itemNumLenStatisticArray].queryLen = queryArray[i].queryLen;
-		(*itemNumLenStatisticArray) ++;
+		lenStatisticArray[itemNum].queryID = queryArray[i].queryID;
+		lenStatisticArray[itemNum].queryLen = queryArray[i].queryLen;
+		itemNum ++;
+	}
+
+	if(itemNum!=itemNumLenStatisticArray)
+	{
+		printf("line=%d, In %s(), itemNum=%ld, itemNumLenStatisticArray=%ld, error!\n", __LINE__, __func__, itemNum, itemNumLenStatisticArray);
+		return FAILED;
 	}
 
 	return SUCCESSFUL;
@@ -239,12 +245,11 @@ short saveSortedQueries(char *sortedQueriesFile, queryLenStatistic_t *lenStatist
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short computeLenStatistics(metrics_t *queryMetrics, queryLenStatistic_t *lenStatisticArray, int64_t itemNumLenStatisticArray)
+short computeLenStatisticsQueryMetrics(metrics_t *queryMetrics, queryLenStatistic_t *lenStatisticArray, int64_t itemNumLenStatisticArray)
 {
-	int i;
+	int32_t i, validQueryNum;
 	int64_t N50_ArrIndex, totalRefBaseNum;
 	double totalQueryLen, tmpTotalLen, N50_TotalLen;
-	int validQueryNum;
 
 	totalRefBaseNum = 0;
 	for(i=0; i<queryMetrics->subjectNum; i++)
@@ -315,7 +320,7 @@ short computeLenStatistics(metrics_t *queryMetrics, queryLenStatistic_t *lenStat
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short computeReferenceCovRatio(metrics_t *queryMetrics, subject_t *subjectArray, int64_t itemNumSubjectArray, query_t *queryArray, int64_t itemNumQueryArray, char *blastnResultFile)
+short computeReferenceCovRatio(metrics_t *queryMetrics, char *refDeletionFile, subject_t *subjectArray, int64_t itemNumSubjectArray, query_t *queryArray, int64_t itemNumQueryArray, char *blastnResultFile)
 {
 	if(fillReferenceBaseFlag(queryMetrics, refDeletionFile, subjectArray, itemNumSubjectArray, queryArray, itemNumQueryArray, blastnResultFile)==FAILED)
 	{
@@ -358,7 +363,7 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 	char *alignBaseBlock[3];
 	int alignBlockLen, middleMatchesSkipLen;
 	int64_t querySubjectNum;
-	int validQuerySubjectFlag, validSegmentFlag;
+	int validQuerySubjectFlag;
 
 
 	fpBlastnRe = fopen(blastnResultFile, "r");
@@ -407,8 +412,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 			return FAILED;
 		}
 
-		//printf("#### %s\n", line);
-
 		if(len==0)
 		{
 			if(fileStatus==EOF_STATUS)
@@ -439,17 +442,9 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 					{
 						pch ++;
 					}
-					//printf("queryTitle=%d\n", pch);
 					strcpy(queryTitle, pch);
 
 					querySubjectNum ++;
-
-					// check the valid querySubject item
-//					if(checkValidQuerySubject(&validQuerySubjectFlag, querySubjectNum, queryArr, itemNumQueryArr, subjectArr, itemNumSubjectArr)==FAILED)
-//					{
-//						printf("line=%d, In %s(), cannot check the valid querySubject item, error!\n", __LINE__, __func__);
-//						return FAILED;
-//					}
 
 					stage = QUERY_TITLE_STAGE;
 
@@ -478,7 +473,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						pch ++;
 					}
 					queryLen = atoi(pch);
-					//printf("queryLen=%d\n", queryLen);
 
 					stage = QUERY_LEN_STAGE;
 
@@ -539,8 +533,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						pch ++;
 					}
 					subjectLen = atoi(pch);
-
-					//fprintf(fpParseResult, ">%s\t%d\t%s\t%d\n", queryTitle, queryLen, subjectTitle, subjectLen);// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 					stage = SUBJECT_LEN_STAGE;
 					continue;
@@ -611,7 +603,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						matchLen_ch[j] = '\0';
 						matchLen = atoi(matchLen_ch);
-						//printf("matchLen=%d\n", matchLen);
 
 						pch ++;
 						j = 0;
@@ -622,7 +613,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						totalMatchLen_ch[j] = '\0';
 						totalMatchLen = atoi(totalMatchLen_ch);
-						//printf("totalMatchLen=%d\n", totalMatchLen);
 
 						while(*pch!='(')
 						{
@@ -638,7 +628,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						matchPercent_ch[j] = '\0';
 						matchPercent = atof(matchPercent_ch) / 100.0;
-						//printf("matchPercent=%f\n", matchPercent);
 
 						while(*pch!='=')
 						{
@@ -650,7 +639,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 
-						//pch ++;
 						j = 0;
 						while(*pch!='/') // get the gapNum
 						{
@@ -659,7 +647,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						gapNum_ch[j] = '\0';
 						gapNum = atoi(gapNum_ch);
-						//printf("gapNum=%d\n", gapNum);
 
 						while(*pch!='(')
 						{
@@ -675,7 +662,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						gapPercent_ch[j] = '\0';
 						gapPercent = atof(gapPercent_ch) / 100.0;
-						//printf("gapPercent=%f\n", gapPercent);
 
 						if(totalMatchLen>=minQueryLenThres*2)
 							validQuerySubjectFlag = YES;
@@ -715,8 +701,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						else
 							strand = MINUS_STRAND;
 
-						//printf("strand=%d\n", strand);
-
 						step = STRAND_STEP;
 						stepMatchFlag = STEP_START_FLAG;
 						continue;
@@ -742,7 +726,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						queryPos_ch[j] = '\0';
 						startQueryPos = atoi(queryPos_ch);
-						//printf("startQueryPos=%d\n", startQueryPos);
 
 						// get the query bases
 						while(*pch==' ') // skip the blanks
@@ -757,7 +740,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 						alignBaseBlock[0][alignBlockLen] = '\0';
-						//printf("QueryBases: %s\n", alignBaseBlock[0]);
 
 						// get the end query pos
 						pch  = line + len - 1;
@@ -768,7 +750,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						pch ++;
 
 						endQueryPos = atoi(pch);
-						//printf("endQueryPos=%d\n", endQueryPos);
 
 						stepMatchFlag = STEP_QUERY_FLAG;
 
@@ -791,7 +772,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 						alignBaseBlock[1][j] = '\0';
-						//printf("            %s\n", alignBaseBlock[1]);
 
 						stepMatchFlag = STEP_MIDDLE_FLAG;
 						continue;
@@ -815,7 +795,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						subjectPos_ch[j] = '\0';
 						startSubjectPos = atoi(subjectPos_ch);
-						//printf("startSubjectPos=%d\n", startSubjectPos);
 
 						// get the subject bases
 						while(*pch==' ') // skip the blanks
@@ -830,7 +809,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 						alignBaseBlock[2][j] = '\0';
-						//printf("SbjctBases: %s\n\n", alignBaseBlock[2]);
 
 						// get the end subject pos
 						pch = line + len - 1;
@@ -841,25 +819,8 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						pch ++;
 
 						endSubjectPos = atoi(pch);
-						//printf("endSubjectPos=%d\n", endSubjectPos);
 
-						//printf("QueryBases: %s  %d  %d\n", alignBaseBlock[0], startQueryPos, endQueryPos);
-						//printf("            %s\n", alignBaseBlock[1]);
-						//printf("SbjctBases: %s  %d  %d\n\n", alignBaseBlock[2], startSubjectPos, endSubjectPos);
-
-
-						// check the valid segments
-//						if(validQuerySubjectFlag==YES)
-//						{
-//							if(checkValidSegment(&validSegmentFlag, querySubjectNum, strand, matchLen, totalMatchLen, gapNum, startQueryPos, startSubjectPos, queryArr, itemNumQueryArr, subjectArr, itemNumSubjectArr)==FAILED)
-//							{
-//								printf("line=%d, In %s(), cannot check the valid segments, error!\n", __LINE__, __func__);
-//								return FAILED;
-//							}
-//						}
-//
 //						// update the base flags of the reference
-//						if(validQuerySubjectFlag==YES && validSegmentFlag==YES)
 						if(validQuerySubjectFlag==YES)
 						{
 							if(updateGenomeBaseFlag(queryMetrics, fpRefDel, alignBaseBlock, alignBlockLen, querySubjectNum, strand, startSubjectPos, endSubjectPos, startQueryPos, endQueryPos, subjectArray, itemNumSubjectArray, queryArray, itemNumQueryArray)==FAILED)
@@ -908,7 +869,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						queryPos_ch[j] = '\0';
 						startQueryPos = atoi(queryPos_ch);
-						//printf("startQueryPos=%d\n", startQueryPos);
 
 						// get the query bases
 						while(*pch==' ') // skip the blanks
@@ -923,7 +883,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 						alignBaseBlock[0][alignBlockLen] = '\0';
-						//printf("QueryBases: %s\n", alignBaseBlock[0]);
 
 						pch = line + len - 1;
 						while(*pch!=' ')
@@ -932,7 +891,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						pch ++;
 						endQueryPos = atoi(pch);
-						//printf("endQueryPos=%d\n", endQueryPos);
 
 						stepMatchFlag = STEP_QUERY_FLAG;
 						continue;
@@ -955,7 +913,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						pch ++;
 					}
 					alignBaseBlock[1][j] = '\0';
-					//printf("            %s\n", alignBaseBlock[1]);
 
 					stepMatchFlag = STEP_MIDDLE_FLAG;
 					continue;
@@ -991,7 +948,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						subjectPos_ch[j] = '\0';
 						startSubjectPos = atoi(subjectPos_ch);
-						//printf("startSubjectPos=%d\n", startSubjectPos);
 
 						// get the subject bases
 						while(*pch==' ') // skip the blanks
@@ -1006,7 +962,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 							pch ++;
 						}
 						alignBaseBlock[2][j] = '\0';
-						//printf("SbjctBases: %s\n\n", alignBaseBlock[2]);
 
 						pch = line + len - 1;
 						while(*pch!=' ')
@@ -1015,14 +970,8 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 						}
 						pch ++;
 						endSubjectPos = atoi(pch);
-						//printf("endSubjectPos=%d\n", endSubjectPos);
-
-						//printf("QueryBases: %s  %d  %d\n", alignBaseBlock[0], startQueryPos, endQueryPos);
-						//printf("            %s\n", alignBaseBlock[1]);
-						//printf("SbjctBases: %s  %d  %d\n\n", alignBaseBlock[2], startSubjectPos, endSubjectPos);
 
 						// update the base flags of the reference
-//						if(validQuerySubjectFlag==YES && validSegmentFlag==YES)
 						if(validQuerySubjectFlag==YES)
 						{
 							if(updateGenomeBaseFlag(queryMetrics, fpRefDel, alignBaseBlock, alignBlockLen, querySubjectNum, strand, startSubjectPos, endSubjectPos, startQueryPos, endQueryPos, subjectArray, itemNumSubjectArray, queryArray, itemNumQueryArray)==FAILED)
@@ -1054,13 +1003,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 					//stage = MATCH_FINISHED_STAGE;
 					stage = LAMBDA_STAGE;
 
-					// print the result !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-					//fprintf(fpParseResult, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", startSubjectPos, endSubjectPos, startQueryPos, endQueryPos, strand, matchLen, totalMatchLen, gapNum, matchPercent);
-
-
-					// save the match result to files
-
-
 					continue;
 				}
 
@@ -1077,9 +1019,6 @@ short fillReferenceBaseFlag(metrics_t *queryMetrics, char *refDeletionFile, subj
 
 				if(matchFlag==YES)
 				{
-					// print the result !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-					//fprintf(fpParseResult, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", startSubjectPos, endSubjectPos, startQueryPos, endQueryPos, strand, matchLen, totalMatchLen, gapNum, matchPercent);
-
 					// reset the parameters
 					stepMatchFlag = STEP_FINISH_FLAG;
 					step = SCORE_STEP;
@@ -1354,6 +1293,185 @@ short computeRefCovRatioByBaseFlag(metrics_t *queryMetrics)
 
 	queryMetrics->lengthMetrics.coveredRatio = (double) queryMetrics->lengthMetrics.coveredBaseNum / queryMetrics->lengthMetrics.totalRefBaseNum;
 
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute the length statistics from fastA file.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short computeLenStatisticsFromFastaFile(char *fastaFileName, char *comments)
+{
+	queryLenStatistic_t *lenStatisticArray, *lenStatisitcBufArray;
+	int64_t itemNumLenStatisticArray, queryNum, sumQueryLen;
+
+	// get the query item number
+	if(getSumLengthQuery(&sumQueryLen, &queryNum, fastaFileName)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot get the queries, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// initialize the memory
+	if(initMemLenStatistics(&lenStatisticArray, &lenStatisitcBufArray, &itemNumLenStatisticArray, queryNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize the memory for query statistics, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// fill the data for queryLenStatisticArray
+	if(fillDataLenStatistic(lenStatisticArray, itemNumLenStatisticArray, fastaFileName)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot fill the query data for statistics, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// sort the queries according to their lengths
+	if(radixSortOfLengths(lenStatisticArray, lenStatisitcBufArray, itemNumLenStatisticArray)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot sort the queries according to their lenghts, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// get the maxSize, N50, mean size, median size
+	if(computeLenStatistics(lenStatisticArray, itemNumLenStatisticArray, comments)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot compute the statistics of queries, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	freeMemLenStatistics(&lenStatisticArray, &lenStatisitcBufArray);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Fill the data for length statistics.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short fillDataLenStatistic(queryLenStatistic_t *lenStatisticArray, int64_t itemNumLenStatisticArray, char *fastaFileName)
+{
+	FILE *fpFasta;
+	char ch;
+	int64_t itemNum, itemLen;
+
+	fpFasta = fopen(fastaFileName, "r");
+	if(fpFasta==NULL)
+	{
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, fastaFileName);
+		return FAILED;
+	}
+
+	ch = fgetc(fpFasta);
+	while(ch!='\n' && ch!=EOF) ch = fgetc(fpFasta);
+
+	itemNum = 0;
+	itemLen = 0;
+	while((ch=fgetc(fpFasta))!=EOF)
+	{
+		if(ch=='>')
+		{ // head title
+			while(ch!='\n' && ch!=EOF) ch = fgetc(fpFasta);
+			itemNum ++;
+
+			lenStatisticArray[itemNum-1].queryID = itemNum;
+			lenStatisticArray[itemNum-1].queryLen = itemLen;
+			itemLen = 0;
+		}else
+		{ // base sequence
+			if(ch!='\n')
+				itemLen ++;
+		}
+	}
+	fclose(fpFasta);
+
+	if(itemLen>0)
+	{
+		itemNum ++;
+		lenStatisticArray[itemNum-1].queryID = itemNum;
+		lenStatisticArray[itemNum-1].queryLen = itemLen;
+		itemLen = 0;
+	}
+
+	if(itemNum!=itemNumLenStatisticArray)
+	{
+		printf("line=%d, In %s(), itemNum=%ld, itemNumLenStatisticArray=%ld, error.\n", __LINE__, __func__, itemNum, itemNumLenStatisticArray);
+		return FAILED;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute the statistics of queries, including maximal size, N50 size, mean size, median size.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short computeLenStatistics(queryLenStatistic_t *lenStatisticArray, int64_t itemNumLenStatisticArray, char *comments)
+{
+	int32_t i;
+	int64_t N50_ArrIndex, totalItemNum, totalItemLen, maxSize, N50Size, medianSize;
+	double totalQueryLen, tmpTotalLen, N50_TotalLen, meanSize;
+	int validQueryNum;
+
+	totalQueryLen = 0;
+	validQueryNum = 0;
+	for(i=0; i<itemNumLenStatisticArray; i++)
+	{
+		if(lenStatisticArray[i].queryLen>=minQueryLenThres)
+		{
+			totalQueryLen += lenStatisticArray[i].queryLen;
+			validQueryNum ++;
+		}
+	}
+
+	N50_ArrIndex = -1;
+	N50_TotalLen = totalQueryLen * 0.5;
+	tmpTotalLen = 0;
+	for(i=0; i<itemNumLenStatisticArray; i++)
+	{
+		if(lenStatisticArray[i].queryLen>=minQueryLenThres)
+		{
+			tmpTotalLen += lenStatisticArray[i].queryLen;
+			if(tmpTotalLen>=N50_TotalLen)
+			{
+				N50_ArrIndex = i;
+				break;
+			}
+		}
+	}
+
+	if(N50_ArrIndex==-1)
+	{
+		printf("line=%d, In %s(), N50_ArrIndex=%lu, error!\n", __LINE__, __func__, N50_ArrIndex);
+		return FAILED;
+	}
+
+	// save the statistics
+	totalItemNum = validQueryNum;
+	totalItemLen = (uint64_t)totalQueryLen;
+	maxSize = lenStatisticArray[0].queryLen;
+	N50Size = lenStatisticArray[N50_ArrIndex].queryLen;
+	if(validQueryNum>0)
+		meanSize = ((double)totalQueryLen)/validQueryNum;
+	else
+	{
+		printf("line=%d, In %s(), validQueryNum=%d, error!\n", __LINE__, __func__, validQueryNum);
+		return FAILED;
+	}
+	medianSize = lenStatisticArray[validQueryNum/2].queryLen;
+
+
+	printf("%s\n", comments);
+	printf("Number of queries  : %ld\n", totalItemNum);
+	printf("Summed query size  : %ld\n", totalItemLen);
+	printf("Maximal query size : %ld\n", maxSize);
+	printf("N50 query size     : %ld\n", N50Size);
+	printf("Mean query size    : %.2f\n", meanSize);
+	printf("Median query size  : %ld\n", medianSize);
 
 	return SUCCESSFUL;
 }

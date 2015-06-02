@@ -14,7 +14,98 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFile, const char *inputQueryFile, const char *mergedSegFile, int64_t threadNum)
+short generateAlignResult(char *outputPathStr, char *queryMatchInfoFile, char *inputBlastnFile, char *inputQueryFile, char *mergedSegFile, int32_t threadNum)
+{
+	struct timeval tpstart, tpend;
+	double timeused;
+	gettimeofday(&tpstart, NULL);
+
+	char perfectQueryFile[256];
+	char matchedQueryFile[256];
+	char disjunctQueryFile[256];
+	char unmatchedQueryFile[256];
+	char linkedQueryMatchInfoFile[256];
+	char parseResultFile[256];
+	char queryMatchInfoFileTmp[256];
+
+	if(initAlignFiles(perfectQueryFile, matchedQueryFile, disjunctQueryFile, unmatchedQueryFile, linkedQueryMatchInfoFile, parseResultFile, queryMatchInfoFileTmp, queryMatchInfoFile, outputPathStr)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize the alignment files, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// run the blastn command to generate the alignment information
+	if(generateBlastnResult(outputPathStr, inputBlastnFile, inputQueryFile, mergedSegFile, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot generate the alignment information, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+
+	// parse the input blastn file
+	if(parseBlastn(parseResultFile, inputBlastnFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot parse the blastn result file, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// convert the query match information into a binary file
+	if(convertMatchInfo(queryMatchInfoFileTmp, parseResultFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot convert the query match information, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+
+	// classify the parsed result
+	if(classifyQueries(perfectQueryFile, matchedQueryFile, disjunctQueryFile, unmatchedQueryFile, linkedQueryMatchInfoFile, queryMatchInfoFile, queryMatchInfoFileTmp, inputQueryFile, mergedSegFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot classify the queries, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// calculate time
+	gettimeofday(&tpend, NULL);
+	timeused = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
+
+	printf("Alignment used time: %.2f seconds.\n", timeused);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Initialize the alignment files.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short initAlignFiles(char *perfectQueryFile, char *matchedQueryFile, char *disjunctQueryFile, char *unmatchedQueryFile, char *linkedQueryMatchInfoFile, char *parseResultFile, char *queryMatchInfoFileTmp, char *queryMatchInfoFile, char *outputPathStr)
+{
+	strcpy(perfectQueryFile, outputPathStr);
+	strcat(perfectQueryFile, "1_perfectQueries");
+	strcpy(matchedQueryFile, outputPathStr);
+	strcat(matchedQueryFile, "2_matchedQueries");
+	strcpy(disjunctQueryFile, outputPathStr);
+	strcat(disjunctQueryFile, "3_disjunctQueries");
+	strcpy(unmatchedQueryFile, outputPathStr);
+	strcat(unmatchedQueryFile, "4_unmatchedQueries");
+	strcpy(linkedQueryMatchInfoFile, outputPathStr);
+	strcat(linkedQueryMatchInfoFile, "linkedQueryMatchInfo");
+
+	strcpy(parseResultFile, outputPathStr);
+	strcat(parseResultFile, "parseResult");
+
+	strcpy(queryMatchInfoFileTmp, queryMatchInfoFile);
+	strcat(queryMatchInfoFileTmp, ".tmp");
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Generate the blastn alignment result information.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFile, const char *inputQueryFile, const char *mergedSegFile, int32_t threadNum)
 {
 	if(threadNum==1)
 	{
@@ -26,7 +117,7 @@ short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFil
 	}else
 	{
 		// initialize the thread parameters
-		if(initThreadParas(&threadArr, &threadParaArr, threadNum, outputPathStr, mergedSegFile)==FAILED)
+		if(initThreadParasBlastn(&threadArr, &threadParaArr, threadNum, outputPathStr, mergedSegFile)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot initialize the thread parameters, error.\n", __LINE__, __func__);
 			return FAILED;
@@ -46,7 +137,7 @@ short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFil
 			return FAILED;
 		}
 
-		if(waitThreadsBlastn(threadArr, threadParaArr, threadNum)==FAILED)
+		if(waitThreads(threadArr, threadParaArr, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot wait threads, error.\n", __LINE__, __func__);
 			return FAILED;
@@ -60,7 +151,7 @@ short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFil
 		}
 
 		// free memory for thread parameters
-		if(freeThreadParas(&threadArr, &threadParaArr, threadNum)==FAILED)
+		if(freeThreadParasBlastn(&threadArr, &threadParaArr, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot free the thread parameters, error.\n", __LINE__, __func__);
 			return FAILED;
@@ -75,7 +166,7 @@ short generateBlastnResult(const char *outputPathStr, const char *inputBlastnFil
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initThreadParas(pthread_t **threadArray, threadPara_t **threadParaArray, int64_t threadNum, const char *outputPathStr, const char *mergedSegFile)
+short initThreadParasBlastn(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, const char *outputPathStr, const char *mergedSegFile)
 {
 	int32_t i;
 
@@ -108,6 +199,7 @@ short initThreadParas(pthread_t **threadArray, threadPara_t **threadParaArray, i
 		sprintf((*threadParaArray)[i].blastnFileName+strlen((*threadParaArray)[i].blastnFileName), "%d", i);
 
 		(*threadParaArray)[i].validFlag = NO;
+		(*threadParaArray)[i].successFlag = NO;
 	}
 
 	return SUCCESSFUL;
@@ -118,7 +210,7 @@ short initThreadParas(pthread_t **threadArray, threadPara_t **threadParaArray, i
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short freeThreadParas(pthread_t **threadArray, threadPara_t **threadParaArray, int64_t threadNum)
+short freeThreadParasBlastn(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum)
 {
 	int32_t i;
 
@@ -155,7 +247,7 @@ short freeThreadParas(pthread_t **threadArray, threadPara_t **threadParaArray, i
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short divideQueryFiles(threadPara_t *threadParaArray, int64_t threadNum, const char *inputQueryFile)
+short divideQueryFiles(threadPara_t *threadParaArray, int32_t threadNum, const char *inputQueryFile)
 {
 	int32_t sizeOrderFlag; // 1: descending order; 2: ascending order; 3: equal order
 
@@ -290,7 +382,7 @@ short fillQuerySizeArray(int32_t *sizeArray, int64_t queryNum, const char *input
  */
 short determineQuerySizeOrder(int32_t *sizeOrderFlag, int32_t *sizeArray, int64_t queryNum)
 {
-	int64_t i, j, sumArray[10], itemNumArray[10], sumArraySize, startRow, endRow, rowNum, entryID, queryRow;
+	int64_t j, sumArray[10], itemNumArray[10], sumArraySize, startRow, endRow, rowNum, entryID, queryRow;
 	double averEntryNum;
 
 	if(queryNum>=10)
@@ -335,7 +427,7 @@ short determineQuerySizeOrder(int32_t *sizeOrderFlag, int32_t *sizeArray, int64_
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short computeSizeSubQueries(threadPara_t *threadParaArray, int64_t threadNum, int32_t sizeOrderFlag, const char *inputQueryFile)
+short computeSizeSubQueries(threadPara_t *threadParaArray, int32_t threadNum, int32_t sizeOrderFlag, const char *inputQueryFile)
 {
 	int64_t sumQueryLen, queryNum;
 
@@ -403,7 +495,7 @@ short getSumLengthQuery(int64_t *sumQueryLen, int64_t *queryNum, const char *inp
  *  @return:
  *  	if succeed, return SUCCESSFUL; if end of file, return FAILED; else, return ERROR.
  */
-short computeQuerySubSum(threadPara_t *threadParaArray, int64_t threadNum, int64_t sumQueryLen, int32_t sizeOrderFlag)
+short computeQuerySubSum(threadPara_t *threadParaArray, int32_t threadNum, int64_t sumQueryLen, int32_t sizeOrderFlag)
 {
 	int32_t i, j, averSize, startRow, endRow, rowNum;
 	int64_t totalSubQueryLen, tmp;
@@ -484,7 +576,7 @@ short computeQuerySubSum(threadPara_t *threadParaArray, int64_t threadNum, int64
 short smoothSampleRatio(double *sampleRatioArray, int32_t arraySize)
 {
 	int32_t i, j, startRow, endRow, rowNum;
-	double resultArray[arraySize], sum, aver;
+	double resultArray[arraySize], sum;
 
 	for(i=0; i<arraySize; i++)
 	{
@@ -514,7 +606,7 @@ short smoothSampleRatio(double *sampleRatioArray, int32_t arraySize)
  *  @return:
  *  	if succeed, return SUCCESSFUL; if end of file, return FAILED; else, return ERROR.
  */
-short generateSubQueries(threadPara_t *threadParaArray, int64_t threadNum, const char *inputQueryFile)
+short generateSubQueries(threadPara_t *threadParaArray, int32_t threadNum, const char *inputQueryFile)
 {
 	FILE *fpQuery, *fpSubQuery;
 	int64_t queryLen, sumSubQueryLen, maxQueryLen, subFileID, returnFlag;
@@ -686,7 +778,7 @@ short getMaxQueryLenFromFile(int64_t *maxQueryLen, const char *queryFileName)
 	fpQuery = NULL;
 
 	*maxQueryLen = maxSeqLen;
-	if(maxQueryLen<=0)
+	if((*maxQueryLen)<=0)
 	{
 		printf("line=%d, In %s(), maxQueryLen=%ld, error!\n", __LINE__, __func__, *maxQueryLen);
 		return FAILED;
@@ -770,7 +862,7 @@ short getSingleFastaItemFromFile(FILE *fpQuery, char *queryHeadTitle, char *quer
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short createThreadsBlastn(pthread_t *threadArray, threadPara_t *threadParaArray, int64_t threadNum)
+short createThreadsBlastn(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum)
 {
 	int32_t i, ret, validNum;
 
@@ -802,7 +894,7 @@ short createThreadsBlastn(pthread_t *threadArray, threadPara_t *threadParaArray,
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short waitThreadsBlastn(pthread_t *threadArray, threadPara_t *threadParaArray, int64_t threadNum)
+short waitThreads(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum)
 {
 	int32_t i;
 
@@ -913,7 +1005,7 @@ short generateBlastnResultNoThread(const char *inputBlastnFile, const char *inpu
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short mergeBlastnResults(const char *inputBlastnFile, threadPara_t *threadParaArray, int64_t threadNum)
+short mergeBlastnResults(const char *inputBlastnFile, threadPara_t *threadParaArray, int32_t threadNum)
 {
 	FILE *fpBlastn, *fpSubBlastn;
 	int32_t i;

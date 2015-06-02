@@ -15,8 +15,8 @@
 #define NULL ((void *)0)
 #endif
 
-#define MISFINDER_VERSION_STR			("v0.4.03.01")
-#define MISFINDER_RELEASE_DATE_STR		("Sep 12, 2014")
+#define MISFINDER_VERSION_STR			("v0.4.05.01")
+#define MISFINDER_RELEASE_DATE_STR		("May 31, 2015")
 
 
 #define DEBUG_SCAF_OVERLAP_FLAG		(NO)
@@ -115,8 +115,8 @@
 #define VARY_LEN_THRES					1000
 //#define END_IGNORE_LEN					30	// deleted 2013-04-23
 #define END_IGNORE_LEN					300		// added 2013-04-23
-//#define MIN_DISJUNCT_DISTANCE_THRES		5000
-#define MIN_DISJUNCT_DISTANCE_THRES		10000
+#define MIN_DISJUNCT_DISTANCE_THRES		5000
+//#define MIN_DISJUNCT_DISTANCE_THRES		10000
 #define MIN_ALIGNED_SEG_LEN_THRES		100
 
 //#define FRAGMENT_SIZE		200
@@ -129,9 +129,14 @@
 #define MAX_READ_BUF_SIZE				10000
 #define MAX_READ_LEN_IN_BUF				5000
 
-
 #define FILE_FORMAT_FASTA				1
 #define FILE_FORMAT_FASTQ				2
+
+#define PE_READ_TYPE					1
+#define MP_READ_TYPE					2
+#define MP_IN_READ_TYPE					3
+#define LONG_PE_READ_TYPE				4
+#define LONG_SE_READ_TYPE				5
 
 #define BLOCK_SIZE_PER_READ				(1 << 26)	// 64 MB
 #define MAX_BLOCKS_NUM_READ				1024
@@ -154,7 +159,6 @@
 #define READS_NUM_PER_FILE_SAMPLE		10000
 #define UNKNOWN_BASE_REPLACE_CHAR		'C'
 #define MAX_UNKNOWN_BASE_NUM			0
-#define RESERVE_HASH_ITEM_READ_SET		(NO)
 
 #define ARTIFACTS_BASE_A_THRESHOLD 		0.9f
 
@@ -162,7 +166,7 @@
 #define KMER_SIZE_DEFAULT				25
 
 //=============== misass ===============
-#define MATCH_SCORE						2
+#define MATCH_SCORE						1
 #define MISMATCH_SCORE					-2
 #define GAP_SCORE						-4
 
@@ -186,6 +190,7 @@
 #define QUERY_GAP						3
 
 #define INDEL_SIZE_DEFAULT				5
+//#define INDEL_SIZE_DEFAULT				1
 #define END_BACK_CHECK_SIZE				100
 
 #define ERR_MISJOIN						1
@@ -196,7 +201,9 @@
 #define SV_DEL							6
 #define GAP_INSERT						7
 #define GAP_DEL							8
-#define MIS_UNCERTAIN					9
+#define UNCER_MISJOIN					9
+#define UNCER_INSERT					10
+#define UNCER_DEL						11
 
 
 #endif /* CONSTANTS_H_ */

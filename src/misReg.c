@@ -26,7 +26,7 @@ short extractMisReg(queryMatchInfo_t *queryMatchInfoSet)
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-		//if(queryArray[i].queryID==3 || strcmp(queryArray[i].queryTitle, "4")==0)
+		//if(queryArray[i].queryID==8 || strcmp(queryArray[i].queryTitle, "scf7180000013826")==0)
 		//{
 		//	printf("****** queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
 		//}
@@ -40,12 +40,12 @@ short extractMisReg(queryMatchInfo_t *queryMatchInfoSet)
 		}
 
 		processedNum ++;
-		if(processedNum%100==0)
-			printf("Queries processed: %d\n", processedNum);
+//		if(processedNum%100==0)
+//			printf("Queries processed: %d\n", processedNum);
 	}
 
-	if(processedNum%100!=0)
-		printf("Queries processed: %d\n", processedNum);
+//	if(processedNum%100!=0)
+//		printf("Queries processed: %d\n", processedNum);
 
 	return SUCCESSFUL;
 }
@@ -92,7 +92,7 @@ short extractMisRegSingleQuery(query_t *queryItem, subject_t *subjectArray)
 			else if(misInfo->misassFlag==STRUCTURE_VARIATION)
 				misassKind = SV_MISJOIN;
 			else if(misInfo->misassFlag==UNCERTAIN_MISASS)
-				misassKind = MIS_UNCERTAIN;
+				misassKind = UNCER_MISJOIN;
 			else
 			{
 				printf("line=%d, In %s(), invalid misassFlag=%d, error!\n", __LINE__, __func__, misInfo->misassFlag);
@@ -208,7 +208,23 @@ short extractMisRegSingleQuery(query_t *queryItem, subject_t *subjectArray)
 					return FAILED;
 				}
 			}else if(misInfo->misassFlag==UNCERTAIN_MISASS)
-				misassKind = MIS_UNCERTAIN;
+			{
+				if(queryIndel->queryIndelKind==QUERY_INSERT)
+					misassKind = UNCER_INSERT;
+				else if(queryIndel->queryIndelKind==QUERY_DEL)
+					misassKind = UNCER_DEL;
+				else if(queryIndel->queryIndelKind==QUERY_GAP)
+				{
+					if(queryIndel->difQuery>queryIndel->difSubject)
+						misassKind = UNCER_INSERT;
+					else
+						misassKind = UNCER_DEL;
+				}else
+				{
+					printf("line=%d, In %s(), invalid queryIndelKind=%d, error!\n", __LINE__, __func__, queryIndel->queryIndelKind);
+					return FAILED;
+				}
+			}
 
 			if(addMisassSeqNodeToMisInfoNode(misInfo, misassKind, subjectID, startQueryPos, endQueryPos, startSubjectPos, endSubjectPos)==FAILED)
 			{

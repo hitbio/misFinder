@@ -9,13 +9,44 @@
 #define STRUCTURE_H_ 1
 
 
+typedef struct ctrlLockNode
+{
+	int32_t readerCnt, writerCnt;
+	pthread_mutex_t accessReaderCnt, accessWriterCnt;
+	pthread_mutex_t writeLock, readerLock, outerLock;
+}ctrlLock_t;
+
 typedef struct
 {
+	int32_t threadID, validThreadNum;
+
+	// parameters for blastn alignment
 	char queryFileName[256];
 	char subjectFileName[256];
 	char blastnFileName[256];
 	int64_t initQuerySubSum, querySubSum;
+
+	// ====== global control variables ======
 	int8_t successFlag, validFlag;
+
+	// ====== global variables for mapping ======
+	int8_t uniqueMapOpFlag;
+
+	struct queryMatchInfoNode *queryMatchInfoSet;
+	struct readSetNode *readSet;
+	struct queryIndexNode *queryIndex;
+
+	// control locks
+	ctrlLock_t *lockArray;
+	int32_t lockArraySize;
+
+	// parameters for reads mapping
+	int64_t startReadID, endReadID, itemNumRead;
+
+	// parameters for mis-assembly identification, SV validation, error correction
+	//int32_t startQueryID, endQueryID, itemNumQuery;
+	double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres;
+
 }threadPara_t;
 
 typedef struct
@@ -87,6 +118,13 @@ typedef struct queryReadNode
 	int32_t queryPos;			// the query position
 }queryRead_t;
 
+typedef struct queryReadSetNode
+{
+	queryRead_t *queryReadArray;
+	int32_t queryReadNum, setID;	// setID: starts from 1
+	//double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres;
+}queryReadSet_t;
+
 // new querySeq
 typedef struct querySeqNode
 {
@@ -118,8 +156,8 @@ typedef struct
 	querySeq_t *newQuerySeqList, *tailNewQuerySeqList;
 	int32_t newQuerySeqNum;
 
-	queryRead_t *queryReadArray;
-	int32_t queryReadNum;
+	queryReadSet_t *queryReadSetArray;
+	int32_t queryReadSetNum;
 
 	uint64_t *covFlagArray;
 
@@ -260,13 +298,13 @@ typedef struct readseqHashBucketNode
 // readMatchInfo
 typedef struct readMatchInfoNode
 {
-	int64_t queryID: 23;
-	int64_t queryPos: 25;			// the query position
-	int64_t alignSize: 16;
-	int64_t readID: 38;
-	int64_t seqlen: 16;
-	int64_t startReadPos: 8;
-	int64_t readOrientation: 2;
+	uint64_t queryID: 23;
+	uint64_t queryPos: 25;			// the query position
+	uint64_t alignSize: 16;
+	uint64_t readID: 39;
+	uint64_t seqlen: 16;
+	uint64_t startReadPos: 8;
+	uint64_t readOrientation: 1;
 }readMatchInfo_t;
 
 // read block
@@ -288,7 +326,7 @@ typedef struct readSetNode
 	int16_t maxReadLen;
 	int64_t totalItemNumRead;
 	int64_t totalValidItemNumRead;
-	int64_t maxItemNumPerReadBlock;
+	int32_t maxItemNumPerReadBlock;
 
 	// readseq blocks
 	readseqBlock_t *readseqBlockArr;		// point to kmerSeqBlock array
@@ -296,12 +334,11 @@ typedef struct readSetNode
 	int16_t maxBlocksNumReadseq;
 	int16_t bytesPerEntryReadseq;
 	int64_t totalItemNumReadseq;
-	int64_t maxEntryNumReadseqBlock;
+	int32_t maxEntryNumReadseqBlock;
 
 	// readseq hash table
 	readseqHashBucket_t *readseqHashtable;
 	int32_t hashTableSizeReadseq;
-	//int16_t baseNumHashingReadseq;					// the base number for generating hash code
 
 	// readseq hash item blocks
 	readseqHashItemBlock_t *readseqHashItemBlockArr;		// point to readseqHashBlock array
@@ -309,23 +346,49 @@ typedef struct readSetNode
 	int16_t maxBlocksNumReadseqHashItem;
 	int16_t bytesPerReadseqHashItem;
 	int64_t totalItemNumReadseqHashItem;
-	int64_t maxItemNumPerReadseqHashItemBlock;
+	int32_t maxItemNumPerReadseqHashItemBlock;
 
 	// read blocks
 	readMatchInfoBlock_t *readMatchInfoBlockArr;		// point to kmerSeqBlock array
 	int16_t blocksNumReadMatchInfo;
-	//int16_t maxBlocksNumReadMatchInfo;
 	int16_t bytesPerReadMatchInfo;
 	int64_t totalItemNumReadMatchInfo;
 	int64_t totalValidItemNumReadMatchInfo;
-	int64_t maxItemNumPerReadMatchInfoBlock;
+	int32_t maxItemNumPerReadMatchInfoBlock;
+
+	int8_t setID;								// starts from 1
+	int8_t readType, pairedMode;
+	double insertSize, standDev;
 
 }readSet_t;
 
-typedef struct readBufNode{
+// readFile
+typedef struct readFileNode
+{
+	char **readFiles;
+	int8_t readFileNum;
+	int8_t readsFileFormatType;
+	int8_t readType;
+	int8_t pairedMode;
+	//int8_t shortReadsFlag;
+	struct readFileNode *next;
+}readFile_t;
+
+//readSet array
+typedef struct readSetArrNode
+{
+	//readFile_t *readFileList;
+	readSet_t *readSetArray;
+	int32_t readSetNum;
+}readSetArr_t;
+
+typedef struct readBufNode
+{
 	char *seq;
 	char *qual;
-	int len;
+	int16_t len, nBaseNum, validFlag;
+	uint64_t *pReadseqInt, hashcode;
+	readseqHashItem_t *pReadseqHashItem;
 }readBuf_t;
 
 //====================== structures for queryIndex =========
@@ -425,7 +488,7 @@ typedef struct alignMatchItemNode
 	int32_t mismatchNum: 10;
 	int32_t pairRow: 16;
 	int32_t validFlag: 3;
-	int32_t startReadPos: 8;
+	int32_t startReadPos: 8;  // start with 1
 	int32_t alignSize: 8;
 	int32_t fragSize: 16;
 }alignMatchItem_t;
@@ -439,9 +502,9 @@ typedef struct baseCovNode
 
 typedef struct queryMarginNode
 {
-	int32_t leftMargin, rightMargin, misassFlag;
+	int32_t leftMargin, rightMargin, misassFlag, queryEndFlag;
 	int32_t disagreeNum, zeroCovNum, discorNum, highCovRegNum, lowCovRegNum;
-	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio;
+	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio, multiReadsRatio;
 }queryMargin_t;
 
 
@@ -449,8 +512,10 @@ typedef struct ratioRegionNode
 {
 	int32_t disagreeNum, zeroCovNum;
 	int32_t startQPosLHalf, endQPosLHalf, startQPosRHalf, endQPosRHalf, midQPos;
+
 	int32_t pairedNum, singleNum, singleNumLeftHalf, singleNumRightHalf, singleMinusNum, singlePlusNum, discorNum;
-	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio;
+	int32_t multiMapReadsNum, totalReadsNum;
+	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio, multiReadsRatio;
 }ratioRegion_t;
 
 

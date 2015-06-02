@@ -73,7 +73,7 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 		circularFlag = queryItem->circularFlag;
 
 		// check head segment
-		if(globalSegArray[0].startQueryPos>=5)
+		if(globalSegArray[0].startQueryPos>=3)
 		{
 			rightMargin = globalSegArray[0].startQueryPos;
 			leftMargin = rightMargin - 1;
@@ -95,13 +95,13 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 			// compute the overlapped align segments of query
 			if(startSegPos==-1)
 			{
-				if(globalSegArray[i-1].subjectID!=globalSegArray[i].subjectID || globalSegArray[i-1].strand!=globalSegArray[i].strand || globalSegArray[i-1].endQueryPos>globalSegArray[i].startQueryPos)
+				if(globalSegArray[i-1].subjectID!=globalSegArray[i].subjectID || globalSegArray[i-1].strand!=globalSegArray[i].strand || globalSegArray[i-1].endQueryPos>globalSegArray[i].startQueryPos || (globalSegArray[i-1].endSubPos-globalSegArray[i].startSubPos<-minDisjunctDistanceThres || globalSegArray[i-1].endSubPos-globalSegArray[i].startSubPos>minDisjunctDistanceThres))
 				{
 					startSegPos = globalSegArray[i].startQueryPos;
 					endSegPos = globalSegArray[i-1].endQueryPos;
 					startItemRow = i - 1;
 
-					if(i==globalSegNum-1)
+					if(i==globalSegNum-1 || (globalSegArray[i-1].strand!=globalSegArray[i].strand || globalSegArray[i-1].subjectID!=globalSegArray[i].subjectID))
 						endItemRow = i;
 					else if(globalSegArray[i+1].startQueryPos>endSegPos)
 						endItemRow = i;
@@ -114,7 +114,7 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 				if(globalSegArray[i].endQueryPos>endSegPos && globalSegArray[i].endQueryPos<endSegPos+200)
 					endSegPos = globalSegArray[i].endQueryPos;
 
-				if(i==globalSegNum-1)
+				if(i==globalSegNum-1 || (globalSegArray[i-1].strand!=globalSegArray[i].strand || globalSegArray[i-1].subjectID!=globalSegArray[i].subjectID))
 					endItemRow = i;
 				else if(globalSegArray[i+1].startQueryPos>endSegPos)
 					endItemRow = i;
@@ -208,12 +208,16 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 							indelKind = QUERY_GAP;
 					}else
 					{
-						if(circularRegFlag==NO)
+						if(circularRegFlag==YES)
+						{
+							startSegPos = endSegPos = -1;
+							startItemRow = endItemRow = -1;
+						}else
 							printf("line=%d, In %s(), startItemRow=%d, endItemRow=%d, difQuery=%d, difSubject=%d\n", __LINE__, __func__, startItemRow, endItemRow, difQuery, difSubject);
 					}
 				}else
-				{ // different strand
-					printf("#+#+#+#+#+#+##+#+#+ different subjects or strands, need further checking ...\n");
+				{ // different strands
+					printf("#+#+#+#+#+#+##+#+#+ line=%d, In %s(), different subjects or strands, need further checking ...\n", __LINE__, __func__);
 					return FAILED;
 				}
 
@@ -339,6 +343,7 @@ short adjustMisInfoList(query_t *queryItem)
 		misInfo = misInfo->next;
 	}
 
+/*
 	// check the query ends
 	misInfo = queryItem->misInfoList;
 	misInfoPre = NULL;
@@ -364,35 +369,8 @@ short adjustMisInfoList(query_t *queryItem)
 		misInfoPre = misInfo;
 		misInfo = misInfo->next;
 	}
-/*
-	// check the indel node
-	misInfo = queryItem->misInfoList;
-	misInfoPre = NULL;
-	while(misInfo)
-	{
-		if(misInfo->misType==QUERY_INDEL_KIND)
-		{
-			queryIndel = misInfo->queryIndel;
-			if(queryIndel->leftMargin<queryIndel->rightMargin)
-			{
-				startQPos = queryIndel->leftMargin;
-				endQPos = queryIndel->rightMargin;
-			}else
-			{
-				startQPos = queryIndel->rightMargin;
-				endQPos = queryIndel->leftMargin;
-			}
-
-			// remove false indels of good alignment
-			mismatchNum
-
-
-		}
-
-		misInfoPre = misInfo;
-		misInfo = misInfo->next;
-	}
 */
+
 	return SUCCESSFUL;
 }
 
@@ -905,6 +883,31 @@ short increaseAlignBufSize(char **alignResultArray, char **alignSeq1, char **ali
 }
 
 /**
+ * Compute alignment gap count.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short computeAlignGapNum(int32_t *gapNum1, int32_t *gapNum2, int32_t *misNum, char **alignResultArray, int32_t overlapLen)
+{
+	int32_t i;
+
+	*gapNum1 = *gapNum2 = 0;
+	*misNum = 0;
+	for(i=0; i<overlapLen; i++)
+	{
+		if(alignResultArray[0][i]=='-')
+			(*gapNum1) ++;
+		else if(alignResultArray[2][i]=='-')
+			(*gapNum2) ++;
+
+		if(alignResultArray[0][i]!='|')
+			(*misNum) ++;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
  * Adjust alignment gap.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
@@ -914,17 +917,10 @@ short adjustAlignmentGap(int32_t *gapNum1, int32_t *gapNum2, char **alignResultA
 	int32_t i, j, mismatchNum, tmpMismatchNum, tmpGapNum, matchRow, mostRightRow, mostLeftRow;
 	char tmp;
 
-	*gapNum1 = *gapNum2 = 0;
-	mismatchNum = 0;
-	for(i=0; i<overlapLen; i++)
+	if(computeAlignGapNum(gapNum1, gapNum2, &mismatchNum, alignResultArray, overlapLen)==FAILED)
 	{
-		if(alignResultArray[0][i]=='-')
-			(*gapNum1) ++;
-		else if(alignResultArray[2][i]=='-')
-			(*gapNum2) ++;
-
-		if(alignResultArray[1][i]!='|')
-			mismatchNum ++;
+		printf("line=%d, In %s(), cannot compute the alignment gap count, error!\n", __LINE__, __func__);
+		return FAILED;
 	}
 
 	if((*gapNum1)>0 || (*gapNum2)>0)
@@ -1172,8 +1168,8 @@ short addInnerIndelToMisInfoList(query_t *queryItem, int32_t startAlignQueryPos,
 		else
 			queryIndelKind = QUERY_GAP;
 
-		difQuery = gapNumQuery;
-		difSubject = gapNumSubject;
+		difQuery = gapNumSubject;
+		difSubject = gapNumQuery;
 
 		// compute the margins
 		for(i=0; i<overlapLen; i++)
@@ -1356,7 +1352,7 @@ short addNewQueryMisInfoNode(query_t *queryItem, int32_t leftSegRow, int32_t rig
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double insertSize, double standDev)
+short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
 {
 	int32_t queryLen;
 	baseCov_t *baseCovArray;
@@ -1394,7 +1390,7 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 
 //	if(queryItem->queryID==5 || strcmp(queryItem->queryTitle, "ctg7180000002352")==0)
 //	{
-//		if(outputCovReadsToFile(covReadsFileName, 10421, 'T', queryItem)==FAILED)
+//		if(outputCovReadsToFile(covReadsFileName, 10421, 'T', queryItem, readSet)==FAILED)
 //		{
 //			printf("line=%d, In %s(), cannot output the covered reads, error!\n", __LINE__, __func__);
 //			return FAILED;
@@ -1402,14 +1398,14 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 //	}
 
 	// determine misjoin
-	if(computeMisjoinSingleQuery(queryItem, baseCovArray, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, insertSize, standDev)==FAILED)
+	if(computeMisjoinSingleQuery(queryItem, baseCovArray, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the misjoin, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// determine indel
-	if(determineQueryIndel(queryItem, baseCovArray, subjectArray, readSet, insertSize, standDev)==FAILED)
+	if(determineQueryIndel(queryItem, baseCovArray, subjectArray, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot determine the queryIndel information, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -1431,7 +1427,7 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double insertSize, double standDev)
+short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
 {
 	int32_t misjoinRegNum;
 	misInfo_t *misInfo;
@@ -1448,7 +1444,7 @@ short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, sub
 	if(misjoinRegNum>0)
 	{
 		// compute the S/P, S-/S, S+/S ratios in breakpoint regions
-		if(computeBreakpointRatios(queryItem, misjoinRegNum, readSet, insertSize, standDev)==FAILED)
+		if(computeBreakpointRatios(queryItem, misjoinRegNum, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the ratios of normal regions, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -1512,7 +1508,7 @@ short outputMisInfoList(query_t *queryItem)
 		if(tailMisInfo->misType==QUERY_MISJOIN_KIND)
 		{
 			queryMargin = tailMisInfo->queryMargin;
-			printf("reg[%d]: [%d, %d], leftRow=%d, rightRow=%d, misType=%d, misassFlag=%d, gapFlag=%d, innerFlag=%d, disagreeNum=%d, zeroCovNum=%d, discorNum=%d, highCovRegNum=%d, lowCovRegNum=%d, SPRatio=%.4f, SMinusRatio=%.4f, SPlusRatio=%.4f, discorRatio=%.4f\n", i, queryMargin->leftMargin, queryMargin->rightMargin, tailMisInfo->leftSegRow, tailMisInfo->rightSegRow, tailMisInfo->misType, tailMisInfo->misassFlag, tailMisInfo->gapFlag, tailMisInfo->innerFlag, queryMargin->disagreeNum, queryMargin->zeroCovNum, queryMargin->discorNum, queryMargin->highCovRegNum, queryMargin->lowCovRegNum, queryMargin->SPRatio, queryMargin->singleMinusRatio, queryMargin->singlePlusRatio, queryMargin->discorRatio);
+			printf("reg[%d]: [%d, %d], leftRow=%d, rightRow=%d, misType=%d, misassFlag=%d, gapFlag=%d, innerFlag=%d, endFlag=%d, disagreeNum=%d, zeroCovNum=%d, discorNum=%d, highCovRegNum=%d, lowCovRegNum=%d, SPRatio=%.4f, SMinusRatio=%.4f, SPlusRatio=%.4f, discorRatio=%.4f, multiRatio=%.4f\n", i, queryMargin->leftMargin, queryMargin->rightMargin, tailMisInfo->leftSegRow, tailMisInfo->rightSegRow, tailMisInfo->misType, tailMisInfo->misassFlag, tailMisInfo->gapFlag, tailMisInfo->innerFlag, queryMargin->queryEndFlag, queryMargin->disagreeNum, queryMargin->zeroCovNum, queryMargin->discorNum, queryMargin->highCovRegNum, queryMargin->lowCovRegNum, queryMargin->SPRatio, queryMargin->singleMinusRatio, queryMargin->singlePlusRatio, queryMargin->discorRatio, queryMargin->multiReadsRatio);
 		}else
 		{
 			queryIndel = tailMisInfo->queryIndel;

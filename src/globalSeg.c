@@ -27,10 +27,10 @@ short fillGlobalAlignSeg(queryMatchInfo_t *queryMatchInfoSet, segLinkSet_t *segL
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-//		if(queryMatchInfoSet->queryArray[i].queryID==74 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "ctg7180000002429")==0)
-//		{
-//			printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
-//		}
+		//if(queryMatchInfoSet->queryArray[i].queryID==299 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "scf7180000014117")==0)
+		//{
+		//	printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
+		//}
 		// ########################### Debug information ##############################
 
 		// fill global segment array
@@ -40,7 +40,7 @@ short fillGlobalAlignSeg(queryMatchInfo_t *queryMatchInfoSet, segLinkSet_t *segL
 			return FAILED;
 		}
 
-		// trim alignment information of unmatched query ends
+		// trim alignment information of unmatched query ends, deleted 2015-03-16
 //		if(trimAlignInfoQueryEnds(queryMatchInfoSet->queryArray+i, queryMatchInfoSet->subjectArray)==FAILED)
 //		{
 //			printf("line=%d, In %s(), cannot trim the alignment information of unmatched query ends, error!\n", __LINE__, __func__);
@@ -1082,7 +1082,7 @@ short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int3
 						endItemRow = i;
 					else if(globalSegArray[i+1].startQueryPos>endSegPos)
 					{
-						if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
+						//if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
 							endItemRow = i;
 					}
 				}
@@ -1103,7 +1103,7 @@ short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int3
 					endItemRow = i;
 				else if(globalSegArray[i+1].startQueryPos>endSegPos)
 				{
-					if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
+					//if(globalSegArray[i+1].startSubPos!=globalSegArray[i].startSubPos && globalSegArray[i+1].endSubPos!=globalSegArray[i].endSubPos)
 						endItemRow = i;
 				}
 			}
@@ -1141,15 +1141,15 @@ short removeRedundantGlobalSegSingleQuery(globalValidSeg_t *globalSegArray, int3
 
 				if(rowSeg1>=0 && rowSeg2>=0)
 				{
-					if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].startSubPos==globalSegArray[rowSeg2].startSubPos)
-					{
-						if(globalSegArray[rowSeg1].matchLen<globalSegArray[rowSeg2].matchLen)
-							rowSeg1 = rowSeg2;
-					}else if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].endSubPos==globalSegArray[rowSeg2].endSubPos)
-					{
-						if(globalSegArray[rowSeg1].matchLen>globalSegArray[rowSeg2].matchLen)
-							rowSeg2 = rowSeg1;
-					}
+//					if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].startSubPos==globalSegArray[rowSeg2].startSubPos)
+//					{
+//						if(globalSegArray[rowSeg1].matchLen<globalSegArray[rowSeg2].matchLen)
+//							rowSeg1 = rowSeg2;
+//					}else if(rowSeg1!=rowSeg2 && globalSegArray[rowSeg1].endSubPos==globalSegArray[rowSeg2].endSubPos)
+//					{
+//						if(globalSegArray[rowSeg1].matchLen>globalSegArray[rowSeg2].matchLen)
+//							rowSeg2 = rowSeg1;
+//					}
 
 					for(j=startItemRow; j<=endItemRow; j++)
 					{

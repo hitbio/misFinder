@@ -14,13 +14,17 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disjunctQueryFile, char *unmatchedQueryFile, char *queryMatchFile, char *queryMatchInfoFileNew, char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile)
+short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disjunctQueryFile, char *unmatchedQueryFile, char *queryMatchFile, char *queryMatchInfoFileUpdated, char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile)
 {
 	int32_t subjectNum;
 	querySubject_t *pQuerySubject;
-	int64_t i, j;
+	int32_t i, j;
+	segLinkSet_t *segLinkSet;
+	queryMatchInfo_t *queryMatchInfoSet;
+	FILE *fpPerfectQuery, *fpMatchedQuery, *fpDisjunctQuery, *fpUnmatchedQuery, *fpQueryMatch;
 
-	if(initMemClassification(perfectQueryFile, matchedQueryFile, disjunctQueryFile, unmatchedQueryFile, queryMatchFile, queryMatchInfoFile, inputQueryFile, mergedSegFile)==FAILED)
+
+	if(initMemClassification(&fpPerfectQuery, &fpMatchedQuery, &fpDisjunctQuery, &fpUnmatchedQuery, &fpQueryMatch, &queryMatchInfoSet, &segLinkSet, perfectQueryFile, matchedQueryFile, disjunctQueryFile, unmatchedQueryFile, queryMatchFile, queryMatchInfoFile, inputQueryFile, mergedSegFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize memory for classification of queries, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -29,7 +33,7 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-		//if(queryMatchInfoSet->queryArray[i].queryID==32 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "ctg7180000002387")==0)
+		//if(queryMatchInfoSet->queryArray[i].queryID==464 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "scf7180000014282")==0)
 		//{
 		//	printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
 		//}
@@ -43,7 +47,7 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
 		for(j=0; j<subjectNum; j++)
 		{
 			// determine the match kind of the querySubject item
-			if(determineMatchKind(pQuerySubject+j, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->matchItemArray, queryMatchInfoSet->subjectArray)==FAILED)
+			if(determineMatchKind(segLinkSet, pQuerySubject+j, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->matchItemArray, queryMatchInfoSet->subjectArray)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot determine the match kind of query %d, error!\n", __LINE__, __func__, queryMatchInfoSet->queryArray[i].queryID);
 				return FAILED;
@@ -96,19 +100,19 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
 	}
 
 	// output the best match to file
-	if(outputGlobalMatchResultToFile(queryMatchInfoSet)==FAILED)
+	if(outputGlobalMatchResultToFile(fpPerfectQuery, fpMatchedQuery, fpDisjunctQuery, fpUnmatchedQuery, fpQueryMatch, queryMatchInfoSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot output the matched result of query %d to file, error!\n", __LINE__, __func__, queryMatchInfoSet->queryArray[i].queryID);
 		return FAILED;
 	}
 
-	if(saveQueryMatchInfoToFile(queryMatchInfoFileNew, queryMatchInfoSet)==FAILED)
+	if(saveQueryMatchInfoToFile(queryMatchInfoFileUpdated, queryMatchInfoSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot save the valid segments, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	freeMemClassification();
+	freeMemClassification(&fpPerfectQuery, &fpMatchedQuery, &fpDisjunctQuery, &fpUnmatchedQuery, &fpQueryMatch, &queryMatchInfoSet, &segLinkSet);
 
 	return SUCCESSFUL;
 }
@@ -118,74 +122,74 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short initMemClassification(char *perfectQueryFile, char *matchedQueryFile, char *disjunctQueryFile, char *unmatchedQueryFile, char *queryMatchFile, char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile)
+short initMemClassification(FILE **fpPerfectQuery, FILE **fpMatchedQuery, FILE **fpDisjunctQuery, FILE **fpUnmatchedQuery, FILE **fpQueryMatch, queryMatchInfo_t **queryMatchInfoSet, segLinkSet_t **segLinkSet, char *perfectQueryFile, char *matchedQueryFile, char *disjunctQueryFile, char *unmatchedQueryFile, char *queryMatchFile, char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile)
 {
 	// load the query match information from the binary file
-	if(loadQueryMatchInfoFromFile(&queryMatchInfoSet, queryMatchInfoFile)==FAILED)
+	if(loadQueryMatchInfoFromFile(queryMatchInfoSet, queryMatchInfoFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot load the query match information, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// fill the queries
-	if(fillQueries(queryMatchInfoSet, inputQueryFile)==FAILED)
+	if(fillQueries(*queryMatchInfoSet, inputQueryFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the queries, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// fill subject sequences
-	if(fillSubjectSeqs(queryMatchInfoSet, mergedSegFile)==FAILED)
+	if(fillSubjectSeqs(*queryMatchInfoSet, mergedSegFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill subject sequences, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	segLinkSet = (segLinkSet_t*) calloc (1, sizeof(segLinkSet_t));
-	if(segLinkSet==NULL)
+	*segLinkSet = (segLinkSet_t*) calloc (1, sizeof(segLinkSet_t));
+	if((*segLinkSet)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	segLinkSet->maxArraySize = MAX_ARR_SIZE_SEG_LINK;
-	segLinkSet->linkArray = (segmentLink_t*) malloc (segLinkSet->maxArraySize * sizeof(segmentLink_t));
-	if(segLinkSet->linkArray==NULL)
+	(*segLinkSet)->maxArraySize = MAX_ARR_SIZE_SEG_LINK;
+	(*segLinkSet)->linkArray = (segmentLink_t*) malloc ((*segLinkSet)->maxArraySize * sizeof(segmentLink_t));
+	if((*segLinkSet)->linkArray==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	fpPerfectQuery = fopen(perfectQueryFile, "w");
-	if(fpPerfectQuery==NULL)
+	*fpPerfectQuery = fopen(perfectQueryFile, "w");
+	if((*fpPerfectQuery)==NULL)
 	{
 		printf("In %s(), cannot open file [ %s ], error!\n", __func__, perfectQueryFile);
 		return FAILED;
 	}
 
-	fpMatchedQuery = fopen(matchedQueryFile, "w");
-	if(fpMatchedQuery==NULL)
+	*fpMatchedQuery = fopen(matchedQueryFile, "w");
+	if((*fpMatchedQuery)==NULL)
 	{
 		printf("In %s(), cannot open file [ %s ], error!\n", __func__, matchedQueryFile);
 		return FAILED;
 	}
 
-	fpDisjunctQuery = fopen(disjunctQueryFile, "w");
-	if(fpDisjunctQuery==NULL)
+	*fpDisjunctQuery = fopen(disjunctQueryFile, "w");
+	if((*fpDisjunctQuery)==NULL)
 	{
 		printf("In %s(), cannot open file [ %s ], error!\n", __func__, disjunctQueryFile);
 		return FAILED;
 	}
 
-	fpUnmatchedQuery = fopen(unmatchedQueryFile, "w");
-	if(fpUnmatchedQuery==NULL)
+	(*fpUnmatchedQuery) = fopen(unmatchedQueryFile, "w");
+	if((*fpUnmatchedQuery)==NULL)
 	{
 		printf("In %s(), cannot open file [ %s ], error!\n", __func__, unmatchedQueryFile);
 		return FAILED;
 	}
 
-	fpQueryMatch = fopen(queryMatchFile, "w");
-	if(fpQueryMatch==NULL)
+	(*fpQueryMatch) = fopen(queryMatchFile, "w");
+	if((*fpQueryMatch)==NULL)
 	{
 		printf("In %s(), cannot open file [ %s ], error!\n", __func__, queryMatchFile);
 		return FAILED;
@@ -194,25 +198,25 @@ short initMemClassification(char *perfectQueryFile, char *matchedQueryFile, char
 	return SUCCESSFUL;
 }
 
-void freeMemClassification()
+void freeMemClassification(FILE **fpPerfectQuery, FILE **fpMatchedQuery, FILE **fpDisjunctQuery, FILE **fpUnmatchedQuery, FILE **fpQueryMatch, queryMatchInfo_t **queryMatchInfoSet, segLinkSet_t **segLinkSet)
 {
-	releaseQueryMatchInfo(&queryMatchInfoSet);
+	releaseQueryMatchInfo(queryMatchInfoSet);
 
-	free(segLinkSet->linkArray);
-	segLinkSet->linkArray = NULL;
-	free(segLinkSet);
-	segLinkSet = NULL;
+	free((*segLinkSet)->linkArray);
+	(*segLinkSet)->linkArray = NULL;
+	free(*segLinkSet);
+	*segLinkSet = NULL;
 
-	fclose(fpPerfectQuery);
-	fpPerfectQuery = NULL;
-	fclose(fpMatchedQuery);
-	fpMatchedQuery = NULL;
-	fclose(fpDisjunctQuery);
-	fpDisjunctQuery = NULL;
-	fclose(fpUnmatchedQuery);
-	fpUnmatchedQuery = NULL;
-	fclose(fpQueryMatch);
-	fpQueryMatch = NULL;
+	fclose(*fpPerfectQuery);
+	*fpPerfectQuery = NULL;
+	fclose(*fpMatchedQuery);
+	*fpMatchedQuery = NULL;
+	fclose(*fpDisjunctQuery);
+	*fpDisjunctQuery = NULL;
+	fclose(*fpUnmatchedQuery);
+	*fpUnmatchedQuery = NULL;
+	fclose(*fpQueryMatch);
+	*fpQueryMatch = NULL;
 }
 
 /**
@@ -220,7 +224,7 @@ void freeMemClassification()
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineMatchKind(querySubject_t *pQuerySubject, int64_t queryLen, matchItem_t *matchItemArray, subject_t *subjectArray)
+short determineMatchKind(segLinkSet_t *segLinkSet, querySubject_t *pQuerySubject, int64_t queryLen, matchItem_t *matchItemArray, subject_t *subjectArray)
 {
 	int64_t i, matchItemNum, headItemRow, tailItemRow;
 	int64_t validTotalMatchLen, subjectLen;
@@ -285,7 +289,9 @@ short determineMatchKind(querySubject_t *pQuerySubject, int64_t queryLen, matchI
 		pQuerySubject->matchKind = PERFECT_MATCH_KIND;
 
 	//}else if(pMatchItemArray[0].matchLen>=validTotalMatchLen*autoMatchPercentThres && validTotalMatchLen-pMatchItemArray[0].totalMatchLen<END_IGNORE_LEN)
-	}else if(pMatchItemArray[0].matchLen>=validTotalMatchLen*autoMatchPercentThres && (pMatchItemArray[0].endQueryPos>queryLen-END_IGNORE_LEN && pMatchItemArray[0].startQueryPos<END_IGNORE_LEN))
+	}
+/*
+	else if(pMatchItemArray[0].matchLen>=validTotalMatchLen*autoMatchPercentThres && (pMatchItemArray[0].endQueryPos>queryLen-END_IGNORE_LEN && pMatchItemArray[0].startQueryPos<END_IGNORE_LEN))
 	{ // match kind with the end length can be ignored
 
 		// get more items =================================
@@ -304,7 +310,9 @@ short determineMatchKind(querySubject_t *pQuerySubject, int64_t queryLen, matchI
 		pQuerySubject->circularFlag = NO;
 		pQuerySubject->matchKind = MATCHED_KIND;
 
-	}else
+	}
+*/
+	else
 	{ // further to determine the match kind
 		// get the first segment
 		if(pMatchItemArray[0].matchLen<pMatchItemArray[0].totalMatchLen*autoMatchPercentThres)
@@ -393,6 +401,13 @@ short determineMatchKind(querySubject_t *pQuerySubject, int64_t queryLen, matchI
 						selectionRound ++;
 					}
 				}
+			}
+
+			// fill broken small segments to link array
+			if(fillBrokenSegsLinkArray(segLinkSet, pMatchItemArray, matchItemNum, usedArray)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot fill broken segments to link array, error!\n", __LINE__, __func__);
+				return FAILED;
 			}
 
 			// check the head and tail of the linked segments
@@ -503,7 +518,7 @@ short determineMatchKind(querySubject_t *pQuerySubject, int64_t queryLen, matchI
 short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t *matchItemArray, int64_t matchItemNum, char *pUsedArray, int64_t queryLen, int64_t subjectLen, int subjectCircularFlag, int selectionRound)
 {
 	int32_t i;
-	int64_t distance, distanceQuery, distanceSubject, minDistQuery, minDistSubject;
+	int64_t distance, distanceQuery, distanceSubject, minDistQuery, minDistSubject, difMatchNum;
 
 	if((selectionRound==1 && matchItemArray[startRowID].endQueryPos>=queryLen-50) || (selectionRound==2 && matchItemArray[startRowID].startQueryPos<50))
 	{
@@ -522,17 +537,15 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 	minDistQuery = minDistSubject = INT_MAX;
 	for(i=0; i<matchItemNum; i++)
 	{
-		//if(pUsedArray[i]==NO && i!=startRowID && matchItemArray[i].totalMatchLen>minAlignedSegLenThres)
-		//if(pUsedArray[i]==NO && i!=startRowID && ((queryLen>END_IGNORE_LEN && matchItemArray[i].totalMatchLen>minAlignedSegLenThres) || (queryLen<=END_IGNORE_LEN && matchItemArray[i].totalMatchLen>0.5*minAlignedSegLenThres)))
 		if(pUsedArray[i]==NO && i!=startRowID && ((queryLen>END_IGNORE_LEN && matchItemArray[i].totalMatchLen>minAlignedSegLenThres) || (queryLen*(1-matchPercentThres)<matchItemArray[i].totalMatchLen && matchItemArray[i].totalMatchLen>0.5*minAlignedSegLenThres)))
 		{
 			if(selectionRound==1)
 			{ // the first selection round
 				distanceQuery = matchItemArray[i].startQueryPos - matchItemArray[startRowID].endQueryPos;
-				if(distanceQuery<0)
-					distanceQuery = -distanceQuery;
-				if(distanceQuery<=varyEndLenThres)
-				{ // distanceQuery <= varyEndLenThres
+//				if(distanceQuery<0)
+//					distanceQuery = -distanceQuery;
+				if(distanceQuery>=-varyEndLenThres && distanceQuery<=varyEndLenThres)
+				{ // |distanceQuery| <= varyEndLenThres
 					if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
 					{ // same strand
 						if(matchItemArray[i].strand==PLUS_STRAND)
@@ -547,9 +560,9 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 									}else // if(matchItemArray[i].startSubPos>=subjectLen-varyEndLenThres && matchItemArray[i].startSubPos<=subjectLen)
 										distanceSubject = matchItemArray[i].startSubPos - matchItemArray[startRowID].endSubPos;
 
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -558,11 +571,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 								}else
 								{
 									distanceSubject = matchItemArray[i].startSubPos - matchItemArray[startRowID].endSubPos;
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceSubject<=varyEndLenThres)
-									{ // distanceSubject <= varyEndLenThres
-										if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+									{ // |distanceSubject| <= varyEndLenThres
+										if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 										{
 											*adjacentRowID = i;
 											minDistQuery = distanceQuery;
@@ -573,11 +586,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 							}else
 							{ // linear subject
 								distanceSubject = matchItemArray[i].startSubPos - matchItemArray[startRowID].endSubPos;
-								if(distanceSubject<0)
-									distanceSubject = -distanceSubject;
-								if(distanceSubject<=varyEndLenThres)
-								{ // distanceSubject <= varyEndLenThres
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//								if(distanceSubject<0)
+//									distanceSubject = -distanceSubject;
+								if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+								{ // |distanceSubject| <= varyEndLenThres
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -597,9 +610,9 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 									}else// if(matchItemArray[i].startSubPos>=1 && matchItemArray[i].startSubPos<=varyEndLenThres)
 										distanceSubject = matchItemArray[startRowID].endSubPos - matchItemArray[i].startSubPos;
 
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -608,11 +621,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 								}else
 								{
 									distanceSubject = matchItemArray[startRowID].endSubPos - matchItemArray[i].startSubPos;
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceSubject<=varyEndLenThres)
-									{ // distanceSubject <= varyEndLenThres
-										if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+									{ // |distanceSubject| <= varyEndLenThres
+										if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 										{
 											*adjacentRowID = i;
 											minDistQuery = distanceQuery;
@@ -623,11 +636,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 							}else
 							{ // linear subject
 								distanceSubject = matchItemArray[startRowID].endSubPos - matchItemArray[i].startSubPos;
-								if(distanceSubject<0)
-									distanceSubject = -distanceSubject;
-								if(distanceSubject<=varyEndLenThres)
-								{ // distanceSubject <= varyEndLenThres
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//								if(distanceSubject<0)
+//									distanceSubject = -distanceSubject;
+								if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+								{ // |distanceSubject| <= varyEndLenThres
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -640,10 +653,10 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 				}
 			}else
 			{ // the second selection round
-				distanceQuery = matchItemArray[i].endQueryPos - matchItemArray[startRowID].startQueryPos;
-				if(distanceQuery<0)
-					distanceQuery = -distanceQuery;
-				if(distanceQuery<=varyEndLenThres)
+				distanceQuery = matchItemArray[startRowID].startQueryPos - matchItemArray[i].endQueryPos;
+//				if(distanceQuery<0)
+//					distanceQuery = -distanceQuery;
+				if(distanceQuery>=-varyEndLenThres && distanceQuery<=varyEndLenThres)
 				{
 					if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
 					{ // same strand
@@ -659,9 +672,9 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 									}else// if(matchItemArray[i].endSubPos>=1 && matchItemArray[i].endSubPos<=varyEndLenThres)
 										distanceSubject = matchItemArray[startRowID].startSubPos - matchItemArray[i].endSubPos;
 
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -670,11 +683,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 								}else
 								{
 									distanceSubject = matchItemArray[startRowID].startSubPos - matchItemArray[i].endSubPos;
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceSubject<=varyEndLenThres)
-									{ // distanceSubject <= varyEndLenThres
-										if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+									{ // |distanceSubject| <= varyEndLenThres
+										if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 										{
 											*adjacentRowID = i;
 											minDistQuery = distanceQuery;
@@ -685,11 +698,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 							}else
 							{ // linear subject
 								distanceSubject = matchItemArray[startRowID].startSubPos - matchItemArray[i].endSubPos;
-								if(distanceSubject<0)
-									distanceSubject = -distanceSubject;
-								if(distanceSubject<=+varyEndLenThres)
+//								if(distanceSubject<0)
+//									distanceSubject = -distanceSubject;
+								if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
 								{ // distanceSubject <= varyEndLenThres
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -709,9 +722,9 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 									}else// if(matchItemArray[i].endSubPos>=subjectLen-varyEndLenThres && matchItemArray[i].endSubPos<=subjectLen)
 										distanceSubject = matchItemArray[i].endSubPos - matchItemArray[startRowID].startSubPos;
 
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -720,11 +733,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 								}else
 								{
 									distanceSubject = matchItemArray[i].endSubPos - matchItemArray[startRowID].startSubPos;
-									if(distanceSubject<0)
-										distanceSubject = -distanceSubject;
-									if(distanceSubject<=varyEndLenThres)
-									{ // distanceSubject <= varyEndLenThres
-										if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//									if(distanceSubject<0)
+//										distanceSubject = -distanceSubject;
+									if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+									{ // |distanceSubject| <= varyEndLenThres
+										if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 										{
 											*adjacentRowID = i;
 											minDistQuery = distanceQuery;
@@ -735,11 +748,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 							}else
 							{ // linear subject
 								distanceSubject = matchItemArray[i].endSubPos - matchItemArray[startRowID].startSubPos;
-								if(distanceSubject<0)
-									distanceSubject = -distanceSubject;
-								if(distanceSubject<=varyEndLenThres)
-								{ // distanceSubject <= varyEndLenThres
-									if(distanceQuery<minDistQuery && distanceSubject<minDistSubject)
+//								if(distanceSubject<0)
+//									distanceSubject = -distanceSubject;
+								if(distanceSubject>=-varyEndLenThres && distanceSubject<=varyEndLenThres)
+								{ // |distanceSubject| <= varyEndLenThres
+									if(distanceQuery<=minDistQuery && distanceSubject<=minDistSubject+100)
 									{
 										*adjacentRowID = i;
 										minDistQuery = distanceQuery;
@@ -767,8 +780,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 					{ // [startRow].endQueryPos-varyEndLenThres <= [i].startQueryPos <= [startRow].endQueryPos+varyEndLenThres
 						if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
 						{ // same strand
-							*adjacentRowID = i;
-							break;
+							if(matchItemArray[i].startQueryPos>matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos>matchItemArray[startRowID].endQueryPos)
+							{
+								*adjacentRowID = i;
+								break;
+							}
 						}
 					}
 				}else
@@ -777,14 +793,49 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 					{
 						if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
 						{ // same strand
-							*adjacentRowID = i;
-							break;
+							if(matchItemArray[i].startQueryPos<matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos<matchItemArray[startRowID].endQueryPos)
+							{
+								*adjacentRowID = i;
+								break;
+							}
 						}
 					}
 				}
 			}
 		}
 	}
+
+//	// get the adjacent aligned segment according to same strand
+//	if((*adjacentRowID)==-1)
+//	{
+//		for(i=0; i<matchItemNum; i++)
+//		{
+//			if(pUsedArray[i]==NO && i!=startRowID && matchItemArray[i].totalMatchLen>minAlignedSegLenThres)
+//			{
+//				if(selectionRound==1)
+//				{ // the first selection round
+//					if(matchItemArray[i].startQueryPos >= matchItemArray[startRowID].endQueryPos-varyEndLenThres && matchItemArray[i].startQueryPos <= matchItemArray[startRowID].endQueryPos+varyEndLenThres)
+//					{ // [startRow].endQueryPos-varyEndLenThres <= [i].startQueryPos <= [startRow].endQueryPos+varyEndLenThres
+//						if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
+//						{ // same strand
+//							*adjacentRowID = i;
+//							break;
+//						}
+//					}
+//				}else
+//				{ // the second selection round
+//					if(matchItemArray[i].endQueryPos >= matchItemArray[startRowID].startQueryPos-varyEndLenThres && matchItemArray[i].endQueryPos <= matchItemArray[startRowID].startQueryPos+varyEndLenThres)
+//					{
+//						if(matchItemArray[i].strand==matchItemArray[startRowID].strand)
+//						{ // same strand
+//							*adjacentRowID = i;
+//							break;
+//						}
+//					}
+//				}
+//			}
+//		}
+//	}
 
 	// get the adjacent aligned segment according to queryPos
 	if((*adjacentRowID)==-1)
@@ -797,15 +848,21 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 				{ // the first selection round
 					if(matchItemArray[i].startQueryPos >= matchItemArray[startRowID].endQueryPos-varyEndLenThres && matchItemArray[i].startQueryPos <= matchItemArray[startRowID].endQueryPos+varyEndLenThres)
 					{ // [startRow].endQueryPos-varyEndLenThres <= [i].startQueryPos <= [startRow].endQueryPos+varyEndLenThres
-						*adjacentRowID = i;
-						break;
+						if(matchItemArray[i].startQueryPos>matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos>matchItemArray[startRowID].endQueryPos)
+						{
+							*adjacentRowID = i;
+							break;
+						}
 					}
 				}else
 				{ // the second selection round
 					if(matchItemArray[i].endQueryPos >= matchItemArray[startRowID].startQueryPos-varyEndLenThres && matchItemArray[i].endQueryPos <= matchItemArray[startRowID].startQueryPos+varyEndLenThres)
 					{
-						*adjacentRowID = i;
-						break;
+						if(matchItemArray[i].startQueryPos<matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos<matchItemArray[startRowID].endQueryPos)
+						{
+							*adjacentRowID = i;
+							break;
+						}
 					}
 				}
 			}
@@ -825,8 +882,8 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 					if(matchItemArray[i].endQueryPos>matchItemArray[startRowID].endQueryPos)
 					{
 						distance = matchItemArray[i].startQueryPos - matchItemArray[startRowID].endQueryPos;
-						if(distance<0)
-							distance = -distance;
+//						if(distance<0)
+//							distance = -distance;
 
 						if(distance<minDistQuery)
 						{
@@ -839,8 +896,8 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 					if(matchItemArray[i].startQueryPos<matchItemArray[startRowID].startQueryPos)
 					{
 						distance = matchItemArray[startRowID].startQueryPos - matchItemArray[i].endQueryPos;
-						if(distance<0)
-							distance = -distance;
+//						if(distance<0)
+//							distance = -distance;
 
 						if(distance<minDistQuery)
 						{
@@ -910,6 +967,81 @@ short addNewItemSegLinkArray(segLinkSet_t *segLinkSet, int32_t dataRow, int32_t 
 			return FAILED;
 		}
 		segLinkSet->maxArraySize *= 2;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Fill broken small segments to link array.
+ * 	@return:
+ * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short fillBrokenSegsLinkArray(segLinkSet_t *segLinkSet, matchItem_t *matchItemArray, int64_t matchItemNum, char *pUsedArray)
+{
+	int32_t i, arrRow, nextArrRow, dataRow, nextDataRow, brokenRowID;
+
+	if(segLinkSet->headRow>=0)
+	{
+		arrRow = segLinkSet->headRow;
+		nextArrRow = segLinkSet->linkArray[arrRow].next;
+		while(nextArrRow>=0)
+		{
+			dataRow = segLinkSet->linkArray[arrRow].arrRow;
+			nextDataRow = segLinkSet->linkArray[nextArrRow].arrRow;
+
+			if(matchItemArray[dataRow].endQueryPos<matchItemArray[nextDataRow].startQueryPos)
+			{
+				// select item row of the broken segment
+				if(selectValidBrokenSegRow(&brokenRowID, dataRow, nextDataRow, matchItemArray, matchItemNum, pUsedArray)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot select valid broken segment row, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				if(brokenRowID>=0)
+				{
+					segLinkSet->linkArray[segLinkSet->itemNum].arrRow = brokenRowID;
+					segLinkSet->linkArray[segLinkSet->itemNum].addedOrder = -1;
+					segLinkSet->linkArray[segLinkSet->itemNum].validFlag = YES;
+					segLinkSet->linkArray[segLinkSet->itemNum].previous = arrRow;
+					segLinkSet->linkArray[segLinkSet->itemNum].next = nextArrRow;
+
+					segLinkSet->linkArray[arrRow].next = segLinkSet->itemNum;
+					segLinkSet->linkArray[nextArrRow].previous = segLinkSet->itemNum;
+					segLinkSet->itemNum ++;
+				}
+			}
+
+			arrRow = nextArrRow;
+			nextArrRow = segLinkSet->linkArray[arrRow].next;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Select item row of the broken segment.
+ * 	@return:
+ * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short selectValidBrokenSegRow(int32_t *brokenRowID, int32_t dataRow, int32_t nextDataRow, matchItem_t *matchItemArray, int64_t matchItemNum, char *pUsedArray)
+{
+	int32_t i;
+
+	*brokenRowID = -1;
+
+	for(i=0; i<matchItemNum; i++)
+	{
+		if(pUsedArray[i]==NO && matchItemArray[i].matchLen>=minQueryLenThres)
+		{
+			if(matchItemArray[i].startQueryPos>matchItemArray[dataRow].endQueryPos-100 && matchItemArray[i].endQueryPos<matchItemArray[nextDataRow].startQueryPos+100)
+			{
+				*brokenRowID = i;
+				break;
+			}
+		}
 	}
 
 	return SUCCESSFUL;
@@ -1261,7 +1393,7 @@ short checkDisjunctFlag(int32_t *disjunctFlag, int32_t circularFlag, int64_t sub
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short outputGlobalMatchResultToFile(queryMatchInfo_t *queryMatchInfoSet)
+short outputGlobalMatchResultToFile(FILE *fpPerfectQuery, FILE *fpMatchedQuery, FILE *fpDisjunctQuery, FILE *fpUnmatchedQuery, FILE *fpQueryMatch, queryMatchInfo_t *queryMatchInfoSet)
 {
 	int32_t i, j, globalSegNum, subjectLen;
 	query_t *queryItem;

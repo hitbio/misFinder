@@ -17,7 +17,7 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *inputQueryFileName, char *subjectsConfigFileName, int minQueryLenThreshold, double matchPercentThreshold, int32_t pairedModePara, char **readFilesPara, int32_t readFileNumPara, int32_t threadNumPara, int32_t indelSizeThresPara)
+int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara)
 {
 	struct timeval tp_start,tp_end;
 	double time_used;
@@ -25,7 +25,7 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *inpu
 
 
 	// initialize the global parameters
-	if(initGlobalParas(operationMode, outputPathName, inputQueryFileName, subjectsConfigFileName, minQueryLenThreshold, matchPercentThreshold, pairedModePara, readFilesPara, readFileNumPara, threadNumPara, indelSizeThresPara)==FAILED)
+	if(initGlobalParas(operationMode, outputPathName, configFilePara, minQueryLenThreshold, matchPercentThreshold, threadNumPara, indelSizeThresPara)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the global parameters, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -43,7 +43,7 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *inpu
 	{
 		printf("\n========== Begin merging the subjects ...\n");
 
-		if(mergeRefSegmentsFasta(mergedSegFile, mergeSubjectsFile)==FAILED)
+		if(mergeRefSegmentsFasta(mergedSegFile, subjectsFile)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot merge segments in fasta, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -54,61 +54,54 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *inpu
 
 	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_METRICS)
 	{
-		printf("\n========== Begin computing the query metrics ...\n");
+		printf("\n========== Begin Blastn alignment ...\n");
 
-		// run the blastn command to generate the alignment information
-		if(generateBlastnResult(outputPathStr, inputBlastnFile, inputQueryFile, mergedSegFile, threadNum)==FAILED)
+		if(generateAlignResult(outputPathStr, queryMatchInfoFile, inputBlastnFile, inputQueryFile, mergedSegFile, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot generate the alignment information, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
+		printf("========== End Blastn alignment.\n");
 
-		// parse the input blastn file
-		if(parseBlastn(parseResultFile, inputBlastnFile)==FAILED)
+		if(operationMode==OPERATION_MODE_METRICS)
 		{
-			printf("line=%d, In %s(), cannot parse the blastn result file, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
-
-		// convert the query match information into a binary file
-		if(convertMatchInfo(queryMatchInfoFile, parseResultFile)==FAILED)
+			// output the statistics of queries
+			if(getQueryMetrics(outputPathStr, queryMatchInfoFile, inputBlastnFile, mergedSegFile)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot get the statistics of queries, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}else
 		{
-			printf("line=%d, In %s(), cannot convert the query match information, error!\n", __LINE__, __func__);
-			return FAILED;
+			// compute query statistics after validation
+			if(computeLenStatisticsFromFastaFile(inputQueryFile, "\nQuery statistics BEFORE mis-assembly validation:")==FAILED)
+			{
+				printf("line=%d, In %s(), cannot compute the statistics of queries, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
 		}
-
-
-		// classify the parsed result
-		if(classifyQueries(perfectQueryFile, matchedQueryFile, disjunctQueryFile, unmatchedQueryFile, linkedQueryMatchInfoFile, queryMatchInfoFileNew, queryMatchInfoFile, inputQueryFile, mergedSegFile)==FAILED)
-		{
-			printf("line=%d, In %s(), cannot classify the queries, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
-
-
-		// output the statistics of queries
-		if(getQueryMetrics(queryStatisticsFile, sortedQueryFile, queryMatchInfoFileNew, inputBlastnFile, mergedSegFile)==FAILED)
-		{
-			printf("line=%d, In %s(), cannot get the statistics of queries, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
-
-		printf("========== End computed the query metrics.\n");
 	}
 
 	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MISASS)
 	{
-		printf("\n========== Begin validating the mis-assemblies ...\n");
+		printf("\n========== Begin mis-assembly validation ...\n");
 
 		// validate the potential mis-assembled queries
-		if(validateMisassQueries(queryMatchInfoFileNew, inputQueryFile, mergedSegFile, readFilesInput, readFileNum, readsFileFormatType)==FAILED)
+		if(validateMisassQueries(outputPathStr, newQueryFile, queryMatchInfoFile, inputQueryFile, mergedSegFile, readFileList)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot validate potential mis-assembled queries, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
-		printf("========== End validated the mis-assemblies.\n");
+		printf("========== End mis-assembly validation.\n");
+
+		// compute query statistics after validation
+		if(computeLenStatisticsFromFastaFile(newQueryFile, "\nQuery statistics AFTER mis-assembly validation:")==FAILED)
+		{
+			printf("line=%d, In %s(), cannot compute the statistics of queries, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
 	}
 
 	resetGlobalParas();
@@ -126,10 +119,8 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *inpu
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initGlobalParas(int32_t operationMode, char *outputPathName, char *queryFileName, char *mergeSubjectsFileName, int minQueryLenThreshold, double matchPercentThreshold, int32_t pairedModePara, char **readFilesPara, int32_t readFileNumPara, int32_t threadNumPara, int32_t indelSizeThresPara)
+short initGlobalParas(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara)
 {
-	int32_t i;
-
 	// global paths and file names
 	if(setGlobalPath(outputPathName)==FAILED)
 	{
@@ -137,110 +128,41 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *queryFi
 		return FAILED;
 	}
 
-	// the subject merge files
-	if(mergeSubjectsFileName!=NULL)
+	strcpy(configFile, configFilePara);
+
+	strcpy(subjectsFile, outputPathStr);
+	strcat(subjectsFile, "subjects");
+
+	// parse configuration file
+	if(parseConfigFile(inputQueryFileInit, subjectsFile, &readFileList, configFile)==FAILED)
 	{
-		strcpy(mergeSubjectsFile, mergeSubjectsFileName);
-	}else
-	{
-		printf("line=%d, In %s(), please specify the input subjects file, error!\n", __LINE__, __func__);
+		printf("line=%d, In %s(), cannot parse configuration file, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
+
+	// check the files to be validate
+	if(checkFilesInConfigfile(operationMode, inputQueryFileInit, subjectsFile, readFileList)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot check configuration file, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// set file names
 	strcpy(mergedSegFile, outputPathStr);
 	strcat(mergedSegFile, "mergedRefSegs");
-
-	if(queryFileName!=NULL)
-	{
-		strcpy(inputQueryFileInit, queryFileName);
-
-		strcpy(inputQueryFile, outputPathStr);
-		strcat(inputQueryFile, "query.fa");
-	}else
-	{
-		printf("line=%d, In %s(), please specify the input queries file, error!\n", __LINE__, __func__);
-		return FAILED;
-	}
+	strcpy(inputQueryFile, outputPathStr);
+	strcat(inputQueryFile, "query.fa");
+	strcpy(newQueryFile, outputPathStr);
+	strcat(newQueryFile, "query_cor.fa");
 
 	// the blastn files
 	strcpy(inputBlastnFile, outputPathStr);
 	strcat(inputBlastnFile, "blastnResult");
 
-	// the metrics files
-	strcpy(queryStatisticsFile, outputPathStr);
-	strcat(queryStatisticsFile, "queryStatistics");
-
-	strcpy(parseResultFile, outputPathStr);
-	strcat(parseResultFile, "parseResult");
 	strcpy(queryMatchInfoFile, outputPathStr);
 	strcat(queryMatchInfoFile, "queryMatchInfo.bin");
-	strcpy(queryMatchInfoFileNew, queryMatchInfoFile);
-	strcat(queryMatchInfoFileNew, ".new");
 
-	strcpy(linkedQueryMatchInfoFile, outputPathStr);
-	strcat(linkedQueryMatchInfoFile, "linkedQueryMatchInfo");
-	strcpy(sortedQueryFile, outputPathStr);
-	strcat(sortedQueryFile, "sortedQueries");
-	strcpy(refDeletionFile, outputPathStr);
-	strcat(refDeletionFile, "refDeletion");
-
-	strcpy(perfectQueryFile, outputPathStr);
-	strcat(perfectQueryFile, "1_perfectQueries");
-	strcpy(matchedQueryFile, outputPathStr);
-	strcat(matchedQueryFile, "2_matchedQueries");
-	strcpy(disjunctQueryFile, outputPathStr);
-	strcat(disjunctQueryFile, "3_disjunctQueries");
-	strcpy(unmatchedQueryFile, outputPathStr);
-	strcat(unmatchedQueryFile, "4_unmatchedQueries");
-
-	strcpy(errorsFile, outputPathStr);
-	strcat(errorsFile, "result_errors");
-	strcpy(svFile, outputPathStr);
-	strcat(svFile, "result_sv");
-	strcpy(misUncertainFile, outputPathStr);
-	strcat(misUncertainFile, "result_warning");
-	strcpy(gapFile, outputPathStr);
-	strcat(gapFile, "result_gap");
-
-	strcpy(newQueryFile, outputPathStr);
-	strcat(newQueryFile, "query_cor.fa");
-
-	readFileNum = readFileNumPara;
-	for(i=0; i<readFileNum; i++)
-	{
-		readFilesInput[i] = (char *) calloc (256, sizeof(char));
-		if(readFilesInput[i]==NULL)
-		{
-			printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
-		strcpy(readFilesInput[i], readFilesPara[i]);
-	}
-
-	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MISASS)
-	{
-		// get reads file format type
-		if(getReadsFileFormat(&readsFileFormatType, readFilesInput, readFileNum)==FAILED)
-		{
-			printf("line=%d, In %s(), cannot get reads file formats, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
-	}
-	pairedMode = pairedModePara;
 	hashTableSizeReadseq = HASH_TABLE_SIZE;
-	reserveHashItemBlocksFlag = RESERVE_HASH_ITEM_READ_SET;
-
-//	kmerSize = KMER_SIZE_DEFAULT;
-//	hashTableSize = HASH_TABLE_SIZE;
-//	entriesPerKmer = ((kmerSize-1) / 32) + 1;
-//	if(kmerSize%32==0)
-//	{
-//		lastEntryMask = (uint64_t) -1;
-//		lastEntryBaseNum = 32;
-//	}else
-//	{
-//		lastEntryMask = (1LLU << ((kmerSize%32)<<1)) - 1;
-//		lastEntryBaseNum = kmerSize % 32;
-//	}
 
 	// global variables
 	if(minQueryLenThreshold>0)
@@ -291,7 +213,6 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *queryFi
 			return FAILED;
 		}
 	}
-	//printf("The alignment will be run with %ld threads.\n", threadNum);
 
 	return SUCCESSFUL;
 }
@@ -341,18 +262,274 @@ short setGlobalPath(const char *outPathStr)
 void resetGlobalParas()
 {
 	int32_t i;
+	readFile_t *readFileNode, *readFileTmp;
 
 	matchPercentThres = 0;
 	shortQueryLenThres = 0;
 	minQueryLenThres = 0;
 
-	for(i=0; i<readFileNum; i++)
+	readFileNode = readFileList;
+	while(readFileNode)
 	{
-		free(readFilesInput[i]);
-		readFilesInput[i] = NULL;
+		readFileTmp = readFileNode->next;
+		for(i=0; i<readFileNode->readFileNum; i++)
+			free(readFileNode->readFiles[i]);
+		free(readFileNode->readFiles);
+		free(readFileNode);
+		readFileNode = readFileTmp;
+	}
+	readFileList = NULL;
+}
+
+/**
+ * Parse the configuration file.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short parseConfigFile(char *inputQueryFileInit, char *subjectSegsFile, readFile_t **readFileList, char *configFile)
+{
+	FILE *fpConfig, *fpSubjectSegs;
+	char line[LINE_CHAR_MAX+1];
+	int32_t i, fileStatus, len, startLineRow, despLineFlag, blankLineFlag, querySectionFlag, refSectionFlag, readSectionFlag;
+
+	fpConfig = fopen(configFile, "r");
+	if(fpConfig==NULL)
+	{
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, configFile);
+		return FAILED;
 	}
 
-	//remove(mergedSegFile);
+	fpSubjectSegs = fopen(subjectSegsFile, "w");
+	if(fpSubjectSegs==NULL)
+	{
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, subjectSegsFile);
+		return FAILED;
+	}
+
+	querySectionFlag = NO;
+	refSectionFlag = NO;
+	readSectionFlag = NO;
+	while(1)
+	{
+		if(readLine(&fileStatus, line, &len, LINE_CHAR_MAX, fpConfig)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot read a line, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		if(len==0)
+		{
+			if(fileStatus==EOF_STATUS)
+				break;
+			else
+				continue;
+		}
+
+		despLineFlag = NO;
+		blankLineFlag = YES;
+		for(i=0; i<len; i++)
+		{
+			if(line[i]!=' ' && line[i]!='\t')
+			{
+				if(line[i]=='#')
+					despLineFlag = YES;
+				blankLineFlag = NO;
+				startLineRow = i;
+				break;
+			}
+		}
+
+		if(despLineFlag==NO && blankLineFlag==NO)
+		{
+			if(querySectionFlag==YES)
+			{
+				if(strcmp(line+startLineRow, "END")==0)
+					querySectionFlag = NO;
+				else
+					strcpy(inputQueryFileInit, line+startLineRow);
+			}else if(refSectionFlag==YES)
+			{
+				if(strcmp(line+startLineRow, "END")==0)
+					refSectionFlag = NO;
+				else
+					fprintf(fpSubjectSegs, "%s\n", line+startLineRow);
+			}else if(readSectionFlag==YES)
+			{
+				if(strcmp(line+startLineRow, "END")==0)
+					readSectionFlag = NO;
+				else
+				{
+					// add the file to read file list
+					if(addToReadFileList(readFileList, line+startLineRow)==FAILED)
+					{
+						printf("line=%d, In %s(), cannot add read file to list, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+				}
+			}else if(strcmp(line+startLineRow, "QUERY")==0)
+				querySectionFlag = YES;
+			else if(strcmp(line+startLineRow, "REF")==0)
+				refSectionFlag = YES;
+			else if(strcmp(line+startLineRow, "READS")==0)
+				readSectionFlag = YES;
+		}
+	}
+
+	fclose(fpConfig);
+	fclose(fpSubjectSegs);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Add read files to list.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short addToReadFileList(readFile_t **readFileList, char *readFiles)
+{
+	readFile_t *readFileNode, *readFileNodeTmp;
+	char readTypeStr[256], *readFileNames[100];
+	int32_t i, readFileNum, len, len_tmp, startRow;
+	int32_t readType, pairedMode, readsFileFormatType;
+
+	readFileNum = 0;
+
+	len = strlen(readFiles);
+	for(i=0; i<len; i++)
+	{
+		if(readFiles[i]=='=')
+		{
+			len_tmp = i;
+			strncpy(readTypeStr, readFiles, len_tmp);
+			readTypeStr[len_tmp] = '\0';
+
+			break;
+		}
+	}
+
+	i ++;
+	while(i<len)
+	{
+		for(; i<len; ++i)
+			if(readFiles[i]!=' ')
+				break;
+		startRow = i;
+		for(i=startRow; i<len; i++)
+		{
+			if(i==len-1 || readFiles[i]==' ' || readFiles[i]=='\t' || readFiles[i]=='\n')
+			{
+				readFileNames[readFileNum] = (char*) calloc (256, sizeof(char));
+				if(readFileNames[readFileNum]==NULL)
+				{
+					printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				if(i==len-1)
+					len_tmp = i - startRow + 1;
+				else
+					len_tmp = i - startRow;
+				strncpy(readFileNames[readFileNum], readFiles+startRow, len_tmp);
+				readFileNames[readFileNum][len_tmp] = '\0';
+				readFileNum ++;
+
+				i ++;
+				break;
+			}
+		}
+	}
+
+	if(strcmp(readTypeStr, "PE")==0)
+		readType = PE_READ_TYPE;
+	else if(strcmp(readTypeStr, "MP")==0)
+		readType = MP_READ_TYPE;
+	else if(strcmp(readTypeStr, "PE_IN")==0)
+		readType = MP_IN_READ_TYPE;
+	else if(strcmp(readTypeStr, "LONG_PE")==0)
+		readType = LONG_PE_READ_TYPE;
+	else if(strcmp(readTypeStr, "LONG_SE")==0)
+		readType = LONG_SE_READ_TYPE;
+
+	// get reads file format type
+	if(getReadsFileFormat(&readsFileFormatType, readFileNames, readFileNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot get reads file formats, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	if(readFileNum==1)
+	{
+		if(readType==PE_READ_TYPE || readType==MP_READ_TYPE || readType==MP_IN_READ_TYPE || readType==LONG_PE_READ_TYPE)
+			pairedMode = 2;
+		else if(readType==LONG_SE_READ_TYPE)
+			pairedMode = 0;
+
+	}else if(readFileNum==2)
+	{
+		if(readType==PE_READ_TYPE || readType==MP_READ_TYPE || readType==MP_IN_READ_TYPE || readType==LONG_PE_READ_TYPE)
+			pairedMode = 1;
+		else if(readType==LONG_SE_READ_TYPE)
+		{
+			printf("Please specify the correct read files.\n");
+			return FAILED;
+		}
+	}else
+	{
+		printf("Please specify the correct read files.\n");
+		return FAILED;
+	}
+
+	// add new node to list
+	readFileNode = (readFile_t*) calloc (1, sizeof(readFile_t));
+	if(readFileNode==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+	readFileNode->readsFileFormatType = readsFileFormatType;
+	readFileNode->readType = readType;
+	readFileNode->pairedMode = pairedMode;
+	readFileNode->readFileNum = readFileNum;
+	readFileNode->next = NULL;
+	readFileNode->readFiles = (char**) calloc (readFileNum, sizeof(char*));
+	if(readFileNode->readFiles==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+	for(i=0; i<readFileNum; i++)
+	{
+		readFileNode->readFiles[i] = (char*) calloc (256, sizeof(char));
+		if(readFileNode->readFiles[i]==NULL)
+		{
+			printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		strcpy(readFileNode->readFiles[i], readFileNames[i]);
+	}
+
+	if((*readFileList)==NULL)
+		*readFileList = readFileNode;
+	else
+	{
+		readFileNodeTmp = *readFileList;
+		while(readFileNodeTmp)
+		{
+			if(readFileNodeTmp->next==NULL)
+			{
+				readFileNodeTmp->next = readFileNode;
+				break;
+			}
+			readFileNodeTmp = readFileNodeTmp->next;
+		}
+	}
+
+	// free memory
+	for(i=0; i<readFileNum; i++)
+		free(readFileNames[i]);
+
+	return SUCCESSFUL;
 }
 
 /**
@@ -360,7 +537,7 @@ void resetGlobalParas()
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getReadsFileFormat(int *readsFileFormatType, char **readFilesInput, int32_t readFileNum)
+short getReadsFileFormat(int32_t *readsFileFormatType, char **readFilesInput, int32_t readFileNum)
 {
 	int32_t i, readFormat;
 	FILE *fpRead;
@@ -417,6 +594,133 @@ short getReadsFileFormat(int *readsFileFormatType, char **readFilesInput, int32_
 }
 
 /**
+ * Check the files in Config file, including the query file, subject file, and read file list.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short checkFilesInConfigfile(int32_t operationMode, char *inputQueryFileInit, char *subjectsFile, readFile_t *readFileList)
+{
+	int32_t i, j;
+	struct stat st;
+	FILE *subjectFileTmp;
+	int32_t len, fileStatus, fileNumTmp;
+	char fileNameTmp[LINE_CHAR_MAX+1];
+	readFile_t *readFileNode;
+
+	// check the query and subjects file names
+	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MERGE || operationMode==OPERATION_MODE_METRICS)
+	{
+		// check the query file name
+		if(inputQueryFileInit==NULL || inputQueryFileInit[0]=='\0')
+		{
+			printf("line=%d, In %s(), please specify the query in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}else if(stat(inputQueryFileInit, &st)==-1)
+		{
+			printf("line=%d, In %s(), query file [ %s ] does not exist, error! Please specify the correct query file in configuration file.\n", __LINE__, __func__, inputQueryFileInit);
+			return FAILED;
+		}
+
+		// check the subjects file names
+		if(subjectsFile==NULL || subjectsFile[0]=='\0')
+		{
+			printf("line=%d, In %s(), please specify the subjects in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}else if(stat(subjectsFile, &st)==-1)
+		{
+			printf("line=%d, In %s(), please specify the correct subjects in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}else
+		{
+			subjectFileTmp = fopen(subjectsFile, "r");
+			if(subjectFileTmp==NULL)
+			{
+				printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, subjectsFile);
+				return FAILED;
+			}
+
+			fileNumTmp = 0;
+			while(1)
+			{
+				if(readLine(&fileStatus, fileNameTmp, &len, LINE_CHAR_MAX, subjectFileTmp)==FAILED)
+				{
+					printf("In %s(), cannot read a line, error!\n", __func__);
+					return FAILED;
+				}
+
+				if(len==0)
+				{
+					if(fileStatus==EOF_STATUS)
+						break;
+					else
+						continue;
+				}
+
+				fileNumTmp ++;
+
+				if(stat(fileNameTmp, &st)==-1)
+				{
+					printf("line=%d, In %s(), please specify the correct subject [ %s ] in configuration file.\n", __LINE__, __func__, fileNameTmp);
+					return FAILED;
+				}
+			}
+
+			if(fileNumTmp==0)
+			{
+				printf("line=%d, In %s(), please specify the subjects in configuration file.\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			fclose(subjectFileTmp);
+		}
+	}
+
+	// check the read file names
+	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MISASS)
+	{
+		if(readFileList==NULL)
+		{
+			printf("line=%d, In %s(), please specify the read files in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		fileNumTmp = 0;
+		readFileNode = readFileList;
+		while(readFileNode)
+		{
+			i = 0;
+			while(i<readFileNode->readFileNum)
+			{
+				if(stat(readFileNode->readFiles[i], &st)==-1)
+				{
+					printf("line=%d, In %s(), please specify the correct read file [ %s ] in configuration file.\n", __LINE__, __func__, readFileNode->readFiles[i]);
+					return FAILED;
+				}
+
+				i ++;
+			}
+
+			fileNumTmp ++;
+
+			readFileNode = readFileNode->next;
+		}
+
+		if(fileNumTmp==0)
+		{
+			printf("line=%d, In %s(), please specify the read files in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}
+		else if(fileNumTmp>=2)
+		{
+			printf("line=%d, In %s(), one paired-end library is supported in current version, and please specify the correct read files in configuration file.\n", __LINE__, __func__);
+			return FAILED;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
  * Copy queries.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
@@ -425,7 +729,7 @@ short copyQueryFile(char *inputQueryFile, char *inputQueryFileInit)
 {
 	char *querySeq, queryHeadTitle[1000], *pch;
 	FILE *fpQuery, *fpQueryInit;
-	int64_t maxQueryLen, secQueryLen, queryID, queryLen, returnFlag;
+	int64_t maxQueryLen, queryLen, returnFlag;
 
 	fpQueryInit = fopen(inputQueryFileInit, "r");
 	if(fpQueryInit==NULL)

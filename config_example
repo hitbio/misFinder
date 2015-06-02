@@ -1,0 +1,21 @@
+# This is a configuration example file.
+
+QUERY
+# Assembly result file, e.g. scaffolds or contigs in fasta format.
+/home/user/misass/misFinder/spombe/scaffolds.fasta
+END
+
+REF
+# Reference segments in fasta format.
+/home/user/misass/misFinder/spombe/refs/NC_004324.fasta
+/home/user/misass/misFinder/spombe/refs/NC_004323.fasta
+/home/user/misass/misFinder/spombe/refs/NC_004321.fasta
+/home/user/misass/misFinder/spombe/refs/NC_001326.fasta
+END
+
+READS
+# Paired-end reads in fastq or fasta format.
+PE=/home/user/misass/misFinder/spombe/reads/paired_reads_1.fastq	/home/user/misass/misFinder/spombe/reads/paired_reads_2.fastq
+#PE=/home/user/misass/misFinder/spombe/reads/paied_reads.fastq
+END
+

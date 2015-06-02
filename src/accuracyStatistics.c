@@ -14,17 +14,21 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short getQueryMetrics(char *queryStatisticFile, char *sortedQueryFile, char *queryMatchInfoFile, char *blastnResultFile, char *mergedSegmentsFile)
+short getQueryMetrics(char *outputPathStr, char *queryMatchInfoFile, char *blastnResultFile, char *mergedSegmentsFile)
 {
+	char queryStatisticFile[256], sortedQueryFile[256], refDeletionFile[256];
+	metrics_t *queryMetrics;
+	queryMatchInfo_t *queryMatchInfoSet;
+
 	// initialize the metrics memory
-	if(initMemQueryMetrics(queryMatchInfoFile)==FAILED)
+	if(initMemQueryMetrics(&queryMetrics, &queryMatchInfoSet, queryStatisticFile, sortedQueryFile, refDeletionFile, queryMatchInfoFile, outputPathStr)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the memory for metrics of queries, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// get the length statistics for queries
-	if(queryLenStatistics(queryMetrics, sortedQueryFile)==FAILED)
+	if(queryLenStatistics(queryMetrics, queryMatchInfoSet, sortedQueryFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot get the length statistics of queries, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -38,7 +42,7 @@ short getQueryMetrics(char *queryStatisticFile, char *sortedQueryFile, char *que
 	}
 
 	// compute the reference covered ratio
-	if(computeReferenceCovRatio(queryMetrics, queryMatchInfoSet->subjectArray, queryMatchInfoSet->itemNumSubjectArray, queryMatchInfoSet->queryArray, queryMatchInfoSet->itemNumQueryArray, blastnResultFile)==FAILED)
+	if(computeReferenceCovRatio(queryMetrics, refDeletionFile, queryMatchInfoSet->subjectArray, queryMatchInfoSet->itemNumSubjectArray, queryMatchInfoSet->queryArray, queryMatchInfoSet->itemNumQueryArray, blastnResultFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the genome covered ratio from queries, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -68,7 +72,7 @@ short getQueryMetrics(char *queryStatisticFile, char *sortedQueryFile, char *que
 	}
 
 	// free the memory of metrics
-	freeMemQueryMetrics();
+	freeMemQueryMetrics(&queryMetrics, &queryMatchInfoSet);
 
 	return SUCCESSFUL;
 }
@@ -78,21 +82,30 @@ short getQueryMetrics(char *queryStatisticFile, char *sortedQueryFile, char *que
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initMemQueryMetrics(char *queryMatchInfoFile)
+short initMemQueryMetrics(metrics_t **queryMetrics, queryMatchInfo_t **queryMatchInfoSet, char *queryStatisticFile, char *sortedQueryFile, char *refDeletionFile, char *queryMatchInfoFile, char *outputPathStr)
 {
 	// load the query match information from the binary file
-	if(loadQueryMatchInfoFromFile(&queryMatchInfoSet, queryMatchInfoFile)==FAILED)
+	if(loadQueryMatchInfoFromFile(queryMatchInfoSet, queryMatchInfoFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the query match information, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// allocate memory for the query metrics
-	if(allocateQueryMetrics(&queryMetrics, queryMatchInfoSet->subjectArray, queryMatchInfoSet->itemNumSubjectArray)==FAILED)
+	if(allocateQueryMetrics(queryMetrics, (*queryMatchInfoSet)->subjectArray, (*queryMatchInfoSet)->itemNumSubjectArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
+
+	// the metrics files
+	strcpy(queryStatisticFile, outputPathStr);
+	strcat(queryStatisticFile, "queryStatistics");
+
+	strcpy(sortedQueryFile, outputPathStr);
+	strcat(sortedQueryFile, "sortedQueries");
+	strcpy(refDeletionFile, outputPathStr);
+	strcat(refDeletionFile, "refDeletion");
 
 	return SUCCESSFUL;
 }
@@ -164,13 +177,13 @@ void releaseQueryMetrics(metrics_t **queryMetrics)
 /**
  * Free the memory of query metrics.
  */
-void freeMemQueryMetrics()
+void freeMemQueryMetrics(metrics_t **queryMetrics, queryMatchInfo_t **queryMatchInfoSet)
 {
 	// free the memory of query match information
-	releaseQueryMatchInfo(&queryMatchInfoSet);
+	releaseQueryMatchInfo(queryMatchInfoSet);
 
 	// free the memory of query metrics
-	releaseQueryMetrics(&queryMetrics);
+	releaseQueryMetrics(queryMetrics);
 }
 
 /**
@@ -180,6 +193,8 @@ void freeMemQueryMetrics()
  */
 short saveQueryStatisticsToFile(char *queryStatisticFile, metrics_t *queryMetrics)
 {
+	FILE *fpStatistics;
+
 	fpStatistics = fopen(queryStatisticFile, "w");
 	if(fpStatistics==NULL)
 	{
@@ -187,7 +202,7 @@ short saveQueryStatisticsToFile(char *queryStatisticFile, metrics_t *queryMetric
 		return FAILED;
 	}
 
-/*
+
 	// print the result on screen
 	printf("\nStatistics of queries:\n");
 	printf("Queries number   : %d\n", queryMetrics->lengthMetrics.totalNum);
@@ -205,7 +220,7 @@ short saveQueryStatisticsToFile(char *queryStatisticFile, metrics_t *queryMetric
 	printf("Matched queries  : lenRatio=%.2f %%, totalLen=%ld, Num=%d, meanSize=%.2f\n", queryMetrics->accuracyMetrics[1].lengthRatio * 100, queryMetrics->accuracyMetrics[1].totalLen, queryMetrics->accuracyMetrics[1].totalNum, queryMetrics->accuracyMetrics[1].meanSize);
 	printf("Disjunct queries : lenRatio=%.2f %%, totalLen=%ld, Num=%d, meanSize=%.2f\n", queryMetrics->accuracyMetrics[2].lengthRatio * 100, queryMetrics->accuracyMetrics[2].totalLen, queryMetrics->accuracyMetrics[2].totalNum, queryMetrics->accuracyMetrics[2].meanSize);
 	printf("Unmatched queries: lenRatio=%.2f %%, totalLen=%ld, Num=%d, meanSize=%.2f\n\n", queryMetrics->accuracyMetrics[3].lengthRatio * 100, queryMetrics->accuracyMetrics[3].totalLen, queryMetrics->accuracyMetrics[3].totalNum, queryMetrics->accuracyMetrics[3].meanSize);
-*/
+
 
 	// output the result to file
 	fprintf(fpStatistics, "Statistics of queries:\n");

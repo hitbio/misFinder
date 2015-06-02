@@ -14,41 +14,176 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeSVInQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+short computeSVInQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, int32_t threadNum)
 {
-	int32_t i, processedNum;
-	query_t *queryArray;
+	struct timeval tpstart, tpend;
+	double timeused;
+	gettimeofday(&tpstart, NULL);
 
-	printf("Begin identifying correct assemblies due to structural variations, please wait ...\n");
+	// initialize the data for threads
+	if(initThreadParasSV(&threadArr, &threadParaArr, threadNum, queryMatchInfoSet, readSetArray->readSetArray)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize mis-assembly identification threads, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// start multiple threads
+	if(createThreadsSV(threadArr, threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot create threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	if(waitThreads(threadArr, threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot wait threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// free memory for thread parameters
+	if(freeThreadParasMisass(&threadArr, &threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot free the thread parameters, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// calculate running time
+	gettimeofday(&tpend, NULL);
+	timeused = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
+
+	printf("Correct assembly identification used time: %.2f seconds.\n", timeused);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Initialize thread parameters for correct assembly validation.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short initThreadParasSV(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+{
+	int32_t i, queryNum, validThreadNum;
+
+	*threadArray = (pthread_t*) calloc (threadNum, sizeof(pthread_t));
+	if((*threadArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	*threadParaArray = (threadPara_t*) calloc (threadNum, sizeof(threadPara_t));
+	if((*threadParaArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	queryNum = queryMatchInfoSet->itemNumQueryArray;
+	if(threadNum<queryMatchInfoSet->itemNumQueryArray)
+		validThreadNum = threadNum;
+	else
+		validThreadNum = queryMatchInfoSet->itemNumQueryArray;
+
+	for(i=0; i<threadNum; i++)
+	{
+		(*threadParaArray)[i].threadID = i;
+		(*threadParaArray)[i].validThreadNum = validThreadNum;
+		(*threadParaArray)[i].successFlag = NO;
+
+		if(i<validThreadNum)
+		{
+			(*threadParaArray)[i].queryMatchInfoSet = queryMatchInfoSet;
+			(*threadParaArray)[i].readSet = readSet;
+			(*threadParaArray)[i].validFlag = YES;
+		}else
+		{
+			(*threadParaArray)[i].validFlag = NO;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Create the threads for mis-assembly identification.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short createThreadsSV(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum)
+{
+	int32_t i, ret, validNum;
+
+	validNum = 0;
+	for(i=0; i<threadNum; i++)
+		if(threadParaArray[i].validFlag==YES)
+			validNum ++;
+
+	printf("Begin identifying correct assemblies due to structural variations using %d threads, please wait ...\n", validNum);
+
+	for(i=0; i<threadNum; i++)
+	{
+		if(threadParaArray[i].validFlag==YES)
+		{
+			ret = pthread_create(threadArray+i, NULL, (void  *) computeSVInQueriesSingleThread, threadParaArray+i);
+			if(ret!=0)
+			{
+				printf("line=%d, In %s(), cannot create threads for mis-assembly identification, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute the structural variations in queries.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short computeSVInQueriesSingleThread(threadPara_t *threadPara)
+{
+	int32_t i, threadID, validThreadNum, processedNum;
+	query_t *queryArray;
+	queryMatchInfo_t *queryMatchInfoSet;
+	readSet_t *readSet;
+
+	threadID = threadPara->threadID;
+	validThreadNum = threadPara->validThreadNum;
+
+	queryMatchInfoSet = threadPara->queryMatchInfoSet;
+	queryArray = queryMatchInfoSet->queryArray;
+	readSet = threadPara->readSet;
 
 	processedNum = 0;
 	queryArray = queryMatchInfoSet->queryArray;
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
-		if(queryArray[i].misassFlag==UNCERTAIN_MISASS || queryArray[i].misassFlag==TRUE_MISASS)
+		if(i%validThreadNum==threadID && (queryArray[i].misassFlag==UNCERTAIN_MISASS || queryArray[i].misassFlag==TRUE_MISASS))
 		{
 			// ########################### Debug information ##############################
-			//if(queryArray[i].queryID==26 || strcmp(queryArray[i].queryTitle, "ctg7180000002423")==0)
-			//{
-			//	printf("------ queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
-			//}
+//			if(queryArray[i].queryID==219 || strcmp(queryArray[i].queryTitle, "scf7180000014037")==0)
+//			{
+//				printf("------ queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
+//			}
 			// ########################### Debug information ##############################
 
 			// compute the structural variations in single query
 			if(computeSVInSingleQuery(queryArray+i, queryMatchInfoSet->subjectArray, readSet)==FAILED)
 			{
-				printf("line=%d, In %s(), cannot determine structural variations in single query, error!\n", __LINE__, __func__);
+				printf("line=%d, In %s(), cannot determine structural variations for single query, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-
-			processedNum ++;
-			if(processedNum%100==0)
-				printf("Queries processed: %d\n", processedNum);
 		}
+
+		processedNum ++;
+//		if(i%validThreadNum==threadID && processedNum%100==0)
+//			printf("Queries processed: %d\n", processedNum);
 	}
 
-	if(processedNum%100!=0)
-		printf("Queries processed: %d\n", processedNum);
+//	if(threadID==validThreadNum-1 && processedNum%100!=0)
+//		printf("Queries processed: %d\n", processedNum);
 
 	return SUCCESSFUL;
 }
@@ -78,7 +213,7 @@ short computeSVInSingleQuery(query_t *queryItem, subject_t *subjectArray, readSe
 		return FAILED;
 	}
 
-	if(determineSVInSingleQuery(queryItem, subjectArray, baseCovArray, readSet, insertSize, standDev)==FAILED)
+	if(determineSVInSingleQuery(queryItem, subjectArray, baseCovArray, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot determine the base coverage of single query, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -94,17 +229,17 @@ short computeSVInSingleQuery(query_t *queryItem, subject_t *subjectArray, readSe
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineSVInSingleQuery(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet, double insertSize, double standDev)
+short determineSVInSingleQuery(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet)
 {
 	// determine SV in misjoin region
-	if(determineSVMisjoinReg(queryItem, subjectArray, baseCovArray, readSet, insertSize, standDev)==FAILED)
+	if(determineSVMisjoinReg(queryItem, subjectArray, baseCovArray, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot check the structural variation region of indel region, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// determine SV in indel region
-	if(determineSVIndelReg(queryItem, subjectArray, baseCovArray, readSet, insertSize, standDev)==FAILED)
+	if(determineSVIndelReg(queryItem, subjectArray, baseCovArray, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot check the structural variation region of indel region, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -118,7 +253,7 @@ short determineSVInSingleQuery(query_t *queryItem, subject_t *subjectArray, base
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineSVMisjoinReg(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet, double insertSize, double standDev)
+short determineSVMisjoinReg(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet)
 {
 	misInfo_t *misInfo;
 	queryMargin_t *queryMargin;
@@ -132,7 +267,7 @@ short determineSVMisjoinReg(query_t *queryItem, subject_t *subjectArray, baseCov
 			if(queryMargin->misassFlag==UNCERTAIN_MISASS)
 			{
 				// check the structural variation region
-				if(checkSVRegMisjoin(queryMargin, baseCovArray, queryItem, readSet, insertSize, standDev)==FAILED)
+				if(checkSVRegMisjoin(queryMargin, baseCovArray, queryItem, readSet)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot check the structural variation region of indel region, error!\n", __LINE__, __func__);
 					return FAILED;
@@ -151,7 +286,7 @@ short determineSVMisjoinReg(query_t *queryItem, subject_t *subjectArray, baseCov
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet, double insertSize, double standDev)
+short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t *baseCovArray, readSet_t *readSet)
 {
 	misInfo_t *misInfo;
 	queryIndel_t *queryIndel;
@@ -165,7 +300,7 @@ short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t
 			if(queryIndel->misassFlag==UNCERTAIN_MISASS)
 			{
 				// check the structural variation region
-				if(checkSVRegQueryIndel(queryIndel, baseCovArray, queryItem, readSet, insertSize, standDev)==FAILED)
+				if(checkSVRegQueryIndel(queryIndel, baseCovArray, queryItem, readSet)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot check the structural variation region of indel region, error!\n", __LINE__, __func__);
 					return FAILED;
@@ -184,7 +319,7 @@ short determineSVIndelReg(query_t *queryItem, subject_t *subjectArray, baseCov_t
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet)
 {
 	int32_t startRegPos, endRegPos, subRegSize, ratioRegionNum, leftPos, rightPos;
 	ratioRegion_t *ratioRegionArray;
@@ -217,7 +352,7 @@ short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, que
 	}
 
 	// compute disagreements, S/P, S-/SL, S+/SR, insert size for each sub-region
-	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, insertSize, standDev)==FAILED)
+	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -259,7 +394,7 @@ short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, que
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet)
 {
 	int32_t leftSegRow, rightSegRow, startRegPos, endRegPos, subRegSize, ratioRegionNum, leftPos, rightPos;
 	ratioRegion_t *ratioRegionArray;
@@ -315,7 +450,7 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
 	}
 
 	// compute disagreements, S/P, S-/SL, S+/SR, insert size for each sub-region
-	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, insertSize, standDev)==FAILED)
+	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -340,7 +475,7 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
 	// ###################### Debug information #########################
 
 	// determine the SV for query indel
-	if(determineSVQueryIndel(queryIndel, ratioRegionArray, ratioRegionNum, subRegSize, queryItem)==FAILED)
+	if(determineSVQueryIndel(queryIndel, ratioRegionArray, ratioRegionNum, subRegSize, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot determine the structural variation for query indel, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -480,11 +615,11 @@ short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionA
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem)
+short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet)
 {
 	int32_t totalDisagreeNum, totalZeroCovNum, discordantNum, headSkipRegNum, tailSkipRegNum;
 	int32_t startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight;
-	double difFragSize;
+	double insertSize, standDev, difFragSize;
 
 	if(queryIndel->leftSegRow==-1)
 		headSkipRegNum = 1;
@@ -520,6 +655,9 @@ short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegion
 		return FAILED;
 	}
 
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
+
 	startQueryPosLeft = queryIndel->leftMargin - insertSize;
 	endQueryPosRight = queryIndel->rightMargin + insertSize;
 	endQueryPosLeft = (startQueryPosLeft + endQueryPosRight) / 2;
@@ -531,7 +669,7 @@ short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegion
 
 
 	// compute the fragment size of paired-end reads between the two regions
-	if(computeFragSizeBothRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight, queryItem, readSet, insertSize, standDev)==FAILED)
+	if(computeFragSizeBothRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 		return FAILED;

@@ -14,26 +14,16 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile, char **readsFileNames, int32_t readsFileNum, int32_t readsFileFormatType)
+short validateMisassQueries(char *outputPathStr, char *newQueryFile, char *queryMatchInfoFile, char *inputQueryFile, char *mergedSegFile, readFile_t *readFileList)
 {
-	// load the query match information from file
-	if(loadQueryMatchInfoFromFile(&queryMatchInfoSet, queryMatchInfoFile)==FAILED)
-	{
-		printf("line=%d, In %s(), cannot load the query match information, error!\n", __LINE__, __func__);
-		return FAILED;
-	}
+	char errorsFile[256], svFile[256], misUncertainFile[256], gapFile[256];
+	queryMatchInfo_t *queryMatchInfoSet;
+	readSetArr_t *readSetArray;
+	queryIndex_t *queryIndex;
 
-	// fill the queries
-	if(fillQueries(queryMatchInfoSet, inputQueryFile)==FAILED)
+	if(initMemMisass(&queryMatchInfoSet, errorsFile, svFile, misUncertainFile, gapFile, inputQueryFile, mergedSegFile, queryMatchInfoFile, outputPathStr)==FAILED)
 	{
-		printf("line=%d, In %s(), cannot fill the queries, error!\n", __LINE__, __func__);
-		return FAILED;
-	}
-
-	// fill subject sequences
-	if(fillSubjectSeqs(queryMatchInfoSet, mergedSegFile)==FAILED)
-	{
-		printf("line=%d, In %s(), cannot fill subject sequences, error!\n", __LINE__, __func__);
+		printf("line=%d, In %s(), cannot initialize the memory for mis-assembly identification, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
@@ -62,28 +52,28 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 			return FAILED;
 		}
 
-		// load the reads data to readSet
-		if(constructReadset(&readSet, readsFileNames, readsFileNum, readsFileFormatType, reserveHashItemBlocksFlag)==FAILED)
+		// load the reads data to readSet array
+		if(constructReadsetArray(&readSetArray, readFileList)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot construct read set, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
-		if(estimateInsertSize(&insertSize, &standDev, readSet, queryIndex)==FAILED)
+		if(estimateInsertSize(queryMatchInfoSet, readSetArray, queryIndex)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot estimate the insert size, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// align the reads to Query Index to generate reads alignment information
-		if(mapReads(queryMatchInfoSet, readSet, queryIndex, insertSize, standDev)==FAILED)
+		if(mapReads(queryMatchInfoSet, readSetArray, queryIndex, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot align reads to queries, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// fill the reads match information to queries
-		if(fillReadMatchInfoQueries(queryMatchInfoSet, readSet)==FAILED)
+		if(fillReadMatchInfoQueries(queryMatchInfoSet, readSetArray)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot fill read match information to read set, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -98,14 +88,14 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 		// ###################### Debug information ##################
 
 		// compute the potential mis-assembled queries
-		if(computeMisassQueries(queryMatchInfoSet, readSet)==FAILED)
+		if(computeMisassQueries(queryMatchInfoSet, readSetArray, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute potential mis-assembled queries, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// determine the structural variations in queries
-		if(computeSVInQueries(queryMatchInfoSet, readSet)==FAILED)
+		if(computeSVInQueries(queryMatchInfoSet, readSetArray, threadNum)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot determine structural variations in queries, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -124,14 +114,14 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 			printf("line=%d, In %s(), cannot extract mis-assembly regions, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
-
+/*
 		// generate the data for Circos
-//		if(generateCircosData(queryMatchInfoSet, readSet)==FAILED)
-//		{
-//			printf("line=%d, In %s(), cannot determine the query mis-assembly, error!\n", __LINE__, __func__);
-//			return FAILED;
-//		}
-
+		if(generateCircosData(queryMatchInfoSet, readSetArray->readSetArray)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot determine the query mis-assembly, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+*/
 		// save mis new queries to file
 		if(saveMisassQueries(errorsFile, svFile, misUncertainFile, gapFile, queryMatchInfoSet)==FAILED)
 		{
@@ -150,8 +140,48 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 		printf("There are no potential mis-assembled queries.\n");
 	}
 
-	// free query match information, query index, readSet
-	freeMisassMem();
+	// free query match information, readSetArray, query index
+	freeMemMisass(&queryMatchInfoSet, &readSetArray, &queryIndex);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Initialize the memory for mis-assembly identification.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short initMemMisass(queryMatchInfo_t **queryMatchInfoSet, char *errorsFile, char *svFile, char *misUncertainFile, char *gapFile, char *inputQueryFile, char *mergedSegFile, char *queryMatchInfoFile, char *outputPathStr)
+{
+	// load the query match information from file
+	if(loadQueryMatchInfoFromFile(queryMatchInfoSet, queryMatchInfoFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot load the query match information, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// fill the queries
+	if(fillQueries(*queryMatchInfoSet, inputQueryFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot fill the queries, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// fill subject sequences
+	if(fillSubjectSeqs(*queryMatchInfoSet, mergedSegFile)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot fill subject sequences, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	strcpy(errorsFile, outputPathStr);
+	strcat(errorsFile, "result_errors");
+	strcpy(svFile, outputPathStr);
+	strcat(svFile, "result_sv");
+	strcpy(misUncertainFile, outputPathStr);
+	strcat(misUncertainFile, "result_warning");
+	strcpy(gapFile, outputPathStr);
+	strcat(gapFile, "result_gap");
 
 	return SUCCESSFUL;
 }
@@ -159,16 +189,16 @@ short validateMisassQueries(char *queryMatchInfoFile, char *inputQueryFile, char
 /**
  * Free the memory of mis-assembled queries validation.
  */
-void freeMisassMem()
+void freeMemMisass(queryMatchInfo_t **queryMatchInfoSet, readSetArr_t **readSetArray, queryIndex_t **queryIndex)
 {
 	// free the memory of query match information
-	releaseQueryMatchInfo(&queryMatchInfoSet);
+	releaseQueryMatchInfo(queryMatchInfoSet);
 
 	// free queryIndex
-	releaseQueryIndex(&queryIndex);
+	releaseQueryIndex(queryIndex);
 
 	// free readSet
-	releaseReadset(&readSet);
+	releaseReadsetArray(readSetArray);
 }
 
 /**
@@ -230,170 +260,221 @@ short computePotentMisassNum(queryMatchInfo_t *queryMatchInfoSet)
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeMisassQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+short computeMisassQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, int32_t threadNum)
 {
-	int32_t i, processedNum;
-	query_t *queryArray;
+	struct timeval tpstart, tpend;
+	double timeused;
+	gettimeofday(&tpstart, NULL);
 
-	printf("Begin identifying assembly errors, please wait ...\n");
-
-	queryArray = queryMatchInfoSet->queryArray;
-
-	// compute insert size
-//	if(computeInsertSize(&insertSize, &standDev, queryMatchInfoSet, readSet)==FAILED)
-//	{
-//		printf("line=%d, In %s(), cannot compute insert size, error!\n", __LINE__, __func__);
-//		return FAILED;
-//	}
 
 	// compute the S/P, S-/S, S+/S ratios in normal regions
-	if(computeNormalRatios(&SP_ratio_Thres, &SMinus_ratio_Thres, &SPlus_ratio_Thres, &discorRatio_Thres, queryMatchInfoSet, readSet, insertSize, standDev)==FAILED)
+	if(computeNormalRatios(&SP_ratio_Thres, &SMinus_ratio_Thres, &SPlus_ratio_Thres, &discorRatio_Thres, queryMatchInfoSet, readSetArray->readSetArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the ratios of normal regions, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	// validate the queries
-	processedNum = 0;
-	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
+
+	// initialize the data for threads
+	if(initThreadParasMisass(&threadArr, &threadParaArr, threadNum, queryMatchInfoSet, readSetArray->readSetArray, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres)==FAILED)
 	{
-		if(queryArray[i].misassFlag==POTENTIAL_MISASS)
-		{
-			// ########################### Debug information ##############################
-			//if(queryArray[i].queryID==4 || strcmp(queryArray[i].queryTitle, "ctg7180000002351")==0)
-			//{
-			//	printf("======= queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
-			//}
-			// ########################### Debug information ##############################
-
-			if(computeSingleMisassQuery(queryArray+i, queryMatchInfoSet->subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, insertSize, standDev)==FAILED)
-			{
-				printf("line=%d, In %s(), cannot validate single potential mis-assembled query, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-
-			processedNum ++;
-			if(processedNum%100==0)
-				printf("Queries processed: %d\n", processedNum);
-		}
+		printf("line=%d, In %s(), cannot initialize mis-assembly identification threads, error!\n", __LINE__, __func__);
+		return FAILED;
 	}
 
-	if(processedNum%100!=0)
-		printf("Queries processed: %d\n", processedNum);
+	// start multiple threads
+	if(createThreadsMisass(threadArr, threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot create threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	if(waitThreads(threadArr, threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot wait threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// free memory for thread parameters
+	if(freeThreadParasMisass(&threadArr, &threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot free the thread parameters, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// calculate running time
+	gettimeofday(&tpend, NULL);
+	timeused = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
+
+	printf("Mis-assembly identification used time: %.2f seconds.\n", timeused);
 
 	return SUCCESSFUL;
 }
 
 /**
- * Compute insert size.
+ * Initialize thread parameters for mis-assembly identification.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeInsertSize(double *insertSize, double *standDev, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+short initThreadParasMisass(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double discorRatio_Thres)
 {
-	int64_t i, j, k, fragSizeSum, pairNum, pairNumTmp, fragSize, maxQueryID, secQueryID;
-	int32_t queryPos1, queryPos2, orient1, orient2, seqLen1, seqLen2;
-	double meanSize, sdev, fragDif, fragDifSum;
+	int32_t i, queryNum, validThreadNum;
 
-	readBlock_t *readBlock;
-	readMatchInfoBlock_t *readMatchInfoBlock;
-	readMatchInfo_t *pReadMatchInfo1, *pReadMatchInfo2;
-
-	fragSizeSum = 0;
-	pairNum = 0;
-
-	if(queryMatchInfoSet->maxQueryID>0)
+	*threadArray = (pthread_t*) calloc (threadNum, sizeof(pthread_t));
+	if((*threadArray)==NULL)
 	{
-		maxQueryID = queryMatchInfoSet->maxQueryID;
-		secQueryID = queryMatchInfoSet->secQueryID;
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
 
-		for(k=0; k<2; k++)
+	*threadParaArray = (threadPara_t*) calloc (threadNum, sizeof(threadPara_t));
+	if((*threadParaArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	queryNum = queryMatchInfoSet->itemNumQueryArray;
+	if(threadNum<queryMatchInfoSet->itemNumQueryArray)
+		validThreadNum = threadNum;
+	else
+		validThreadNum = queryMatchInfoSet->itemNumQueryArray;
+
+	for(i=0; i<threadNum; i++)
+	{
+		(*threadParaArray)[i].threadID = i;
+		(*threadParaArray)[i].validThreadNum = validThreadNum;
+		(*threadParaArray)[i].successFlag = NO;
+
+		if(i<validThreadNum)
 		{
-			pairNumTmp = 0;
-			fragDifSum = 0;
-			for(i=0; i<readSet->blocksNumRead; i++)
+			(*threadParaArray)[i].queryMatchInfoSet = queryMatchInfoSet;
+			(*threadParaArray)[i].readSet = readSet;
+			(*threadParaArray)[i].SP_ratio_Thres = SP_ratio_Thres;
+			(*threadParaArray)[i].SMinus_ratio_Thres = SMinus_ratio_Thres;
+			(*threadParaArray)[i].SPlus_ratio_Thres = SPlus_ratio_Thres;
+			(*threadParaArray)[i].discorRatio_Thres = discorRatio_Thres;
+			(*threadParaArray)[i].validFlag = YES;
+		}else
+		{
+			(*threadParaArray)[i].validFlag = NO;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Free the thread parameters for mis-assembly identification.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short freeThreadParasMisass(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum)
+{
+	int32_t i;
+
+	for(i=0; i<threadNum; i++)
+	{
+		if((*threadParaArray)[i].validFlag==YES)
+		{
+			(*threadParaArray)[i].queryMatchInfoSet = NULL;
+			(*threadParaArray)[i].readSet = NULL;
+		}
+	}
+
+	free(*threadArray);
+	*threadArray = NULL;
+
+	free(*threadParaArray);
+	*threadParaArray = NULL;
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Create the threads for mis-assembly identification.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short createThreadsMisass(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum)
+{
+	int32_t i, ret, validNum;
+
+	validNum = 0;
+	for(i=0; i<threadNum; i++)
+		if(threadParaArray[i].validFlag==YES)
+			validNum ++;
+
+	printf("Begin identifying assembly errors using %d threads, please wait ...\n", validNum);
+
+	for(i=0; i<threadNum; i++)
+	{
+		if(threadParaArray[i].validFlag==YES)
+		{
+			ret = pthread_create(threadArray+i, NULL, (void  *) computeMisassQueriesSingleThread, threadParaArray+i);
+			if(ret!=0)
 			{
-				readBlock = readSet->readBlockArr + i;
-				readMatchInfoBlock = readSet->readMatchInfoBlockArr + i;
-				for(j=0; j<readBlock->itemNum; j+=2)
-				{
-					pReadMatchInfo1 = readMatchInfoBlock->readMatchInfoArr + j;
-					pReadMatchInfo2 = readMatchInfoBlock->readMatchInfoArr + j + 1;
-
-					if(pReadMatchInfo1->queryID>0 && pReadMatchInfo1->queryID==pReadMatchInfo2->queryID && (pReadMatchInfo1->queryID==maxQueryID || pReadMatchInfo1->queryID==secQueryID))
-					{
-						if(pReadMatchInfo1->readID+1!=pReadMatchInfo2->readID)
-						{
-							printf("line=%d, In %s(), readID1=%ld, readID2=%ld, error!\n", __LINE__, __func__, (int64_t)pReadMatchInfo1->readID, (int64_t)pReadMatchInfo2->readID);
-							return FAILED;
-						}
-
-						queryPos1 = pReadMatchInfo1->queryPos;
-						seqLen1 = pReadMatchInfo1->seqlen;
-						orient1 = pReadMatchInfo1->readOrientation;
-						queryPos2 = pReadMatchInfo2->queryPos;
-						seqLen2 = pReadMatchInfo2->seqlen;
-						orient2 = pReadMatchInfo2->readOrientation;
-
-						fragSize = 0;
-						if(orient1==ORIENTATION_PLUS && orient2==ORIENTATION_MINUS)
-							fragSize = queryPos2 + seqLen2 - queryPos1;
-						else if(orient2==ORIENTATION_PLUS && orient1==ORIENTATION_MINUS)
-							fragSize = queryPos1 + seqLen1 - queryPos2;
-
-						if(fragSize>0)
-						{
-							if(k==0)
-							{
-								fragSizeSum += fragSize;
-							}else
-							{
-								fragDif = (fragSize - meanSize) * (fragSize - meanSize);
-								fragDifSum += fragDif;
-							}
-							pairNumTmp ++;
-						}
-					}
-				}
-			}
-
-			if(k==0)
-			{
-				if(pairNumTmp>0)
-				{
-					pairNum = pairNumTmp;
-					meanSize = (double)fragSizeSum / pairNum;
-				}else
-				{
-					printf("line=%d, In %s(), no valid paired reads for computing insert size of library, error!\n", __LINE__, __func__);
-					return FAILED;
-				}
-			}else
-			{
-				if(pairNumTmp!=pairNum)
-				{
-					printf("line=%d, In %s(), cannot compute insert size of library, error!\n", __LINE__, __func__);
-					return FAILED;
-				}
-
-				sdev = sqrt((fragDifSum) / pairNumTmp);
+				printf("line=%d, In %s(), cannot create threads for mis-assembly identification, error!\n", __LINE__, __func__);
+				return FAILED;
 			}
 		}
 	}
 
-	if(pairNum>0)
-	{
-		*insertSize = meanSize;
-		*standDev = sdev;
+	return SUCCESSFUL;
+}
 
-		printf("insertSize=%.4f, SDev=%.4f\n", *insertSize, *standDev);
-	}else
+/**
+ * Compute potential mis-assemblies using single thread.
+ */
+void computeMisassQueriesSingleThread(threadPara_t *threadPara)
+{
+	int32_t i, threadID, validThreadNum, processedNum;
+	queryMatchInfo_t *queryMatchInfoSet;
+	query_t *queryArray;
+	readSet_t *readSet;
+	double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres;
+
+	threadID = threadPara->threadID;
+	validThreadNum = threadPara->validThreadNum;
+
+	queryMatchInfoSet = threadPara->queryMatchInfoSet;
+	queryArray = queryMatchInfoSet->queryArray;
+	readSet = threadPara->readSet;
+
+	SP_ratio_Thres = threadPara->SP_ratio_Thres;
+	SMinus_ratio_Thres = threadPara->SMinus_ratio_Thres;
+	SPlus_ratio_Thres = threadPara->SPlus_ratio_Thres;
+	discorRatio_Thres = threadPara->discorRatio_Thres;
+
+	// validate the queries
+	processedNum = 0;
+	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
-		printf("line=%d, In %s(), no valid paired reads for computing insert size of library, error!\n", __LINE__, __func__);
-		return FAILED;
+		if(i%validThreadNum==threadID && queryArray[i].misassFlag==POTENTIAL_MISASS)
+		{
+			// ########################### Debug information ##############################
+			//if(queryArray[i].queryID==219 || strcmp(queryArray[i].queryTitle, "scf7180000014037")==0)
+			//{
+			//	printf("======= queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
+			//}
+			// ########################### Debug information ##############################
+
+			if(computeSingleMisassQuery(queryArray+i, queryMatchInfoSet->subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot validate single potential mis-assembled query, error!\n", __LINE__, __func__);
+				return;
+			}
+		}
+
+		processedNum ++;
+//		if(i%validThreadNum==threadID && processedNum%100==0)
+//			printf("Queries processed: %d\n", processedNum);
 	}
 
-	return SUCCESSFUL;
+//	if(threadID==validThreadNum-1 && processedNum%100!=0)
+//		printf("Queries processed: %d\n", processedNum);
+
+	threadPara->successFlag = SUCCESSFUL;
 }
 
 /**
@@ -401,7 +482,7 @@ short computeInsertSize(double *insertSize, double *standDev, queryMatchInfo_t *
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double insertSize, double standDev)
+short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
 {
 	// get the misInfo list
 	if(getMisInfoList(queryItem, subjectArray)==FAILED)
@@ -411,7 +492,7 @@ short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, read
 	}
 
 	// determine mis-assembly information for each node in the list
-	if(determineMisInfoSingleQuery(queryItem, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, insertSize, standDev)==FAILED)
+	if(determineMisInfoSingleQuery(queryItem, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot determine the mis-assembly information, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -431,10 +512,10 @@ short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, read
  */
 short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet)
 {
-	int32_t i, j, k, startQueryRow, endQueryRow, startReadRow;
-	queryRead_t *queryRead;
+	int32_t i, j, k, startQueryRow, endQueryRow, startReadRow, queryReadNum;
+	queryRead_t *queryRead, *queryReadArray;
 
-	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
+	int32_t setID, readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
 	readBlock_t *readBlockArray;
 	read_t *pRead;
 	readseqBlock_t *readseqBlockArray;
@@ -447,13 +528,16 @@ short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, rea
 		return FAILED;
 	}
 
+	setID = readSet->setID;
 	readBlockArray = readSet->readBlockArr;
 	maxItemNumPerReadBlock = readSet->maxItemNumPerReadBlock;
 	readseqBlockArray = readSet->readseqBlockArr;
 
-	for(i=0; i<queryItem->queryReadNum; i++)
+	queryReadArray = queryItem->queryReadSetArray[setID-1].queryReadArray;
+	queryReadNum = queryItem->queryReadSetArray[setID-1].queryReadNum;
+	for(i=0; i<queryReadNum; i++)
 	{
-		queryRead = queryItem->queryReadArray + i;
+		queryRead = queryReadArray + i;
 
 		readBlockID = (queryRead->readID - 1) / maxItemNumPerReadBlock;
 		rowNumInReadBlock = (queryRead->readID - 1) % maxItemNumPerReadBlock;
@@ -541,11 +625,11 @@ short outputBaseCovSingleQueryToFile(char *covFileName, baseCov_t *baseCovArray,
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, query_t *queryItem)
+short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, query_t *queryItem, readSet_t *readSet)
 {
 	FILE *fpCovReads;
-	int32_t i, j, startQueryRow, endQueryRow, readRow;
-	queryRead_t *queryRead;
+	int32_t i, setID, startQueryRow, endQueryRow, readRow, queryReadNum;
+	queryRead_t *queryRead, *queryReadArray;
 	char orient;
 
 	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
@@ -562,15 +646,18 @@ short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, q
 		return FAILED;
 	}
 
+	setID = readSet->setID;
 	readBlockArray = readSet->readBlockArr;
 	maxItemNumPerReadBlock = readSet->maxItemNumPerReadBlock;
 	readseqBlockArray = readSet->readseqBlockArr;
 
+	queryReadArray = queryItem->queryReadSetArray[setID-1].queryReadArray;
+	queryReadNum = queryItem->queryReadSetArray[setID-1].queryReadNum;
 	if(basePos<queryItem->queryLen)
 	{
-		for(i=0; i<queryItem->queryReadNum; i++)
+		for(i=0; i<queryReadNum; i++)
 		{
-			queryRead = queryItem->queryReadArray + i;
+			queryRead = queryReadArray + i;
 
 			startQueryRow = queryRead->queryPos - 1;
 			endQueryRow = startQueryRow + queryRead->seqlen - 1;
@@ -598,7 +685,7 @@ short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, q
 						orient = '+';
 					else
 						orient = '-';
-					fprintf(fpCovReads, "%ld\t%d\t%c\t%d\t%s\n", queryRead->readID, queryRead->queryPos, orient, readRow, readseq);
+					fprintf(fpCovReads, "%ld\t%d\t%c\t%d\t%s\n", (int64_t)queryRead->readID, queryRead->queryPos, orient, readRow, readseq);
 				}
 			}
 		}
@@ -1591,84 +1678,6 @@ short computeRightMargin(int64_t *rightMargin, int64_t *rightMarginSubject, char
 	else
 		subjectPosShiftFactor = -1;
 
-//	if(marginBlockID==-1)
-//	{
-//		startRow = overlapLen - winSize;
-//		endRow = overlapLen - 1;
-//		if(startRow<0)
-//			startRow = 0;
-//		targetRow = -1;
-//		for(i=startRow; i<=endRow; i++)
-//		{
-//			if(pMatchSeq[i]!='|')
-//			{
-//				for(j=i-1; j>=0; j--)
-//				{
-//					if(pMatchSeq[j]=='|')
-//					{
-//						targetRow = j;
-//						break;
-//					}
-//				}
-//
-//				if(targetRow>=0)
-//					break;
-//			}
-//		}
-//		if(targetRow<0)
-//		{
-//			if(i>endRow)
-//				targetRow = endRow;
-//			else
-//			{
-//				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
-//				return FAILED;
-//			}
-//		}
-//
-//		// get the query position
-//		gapNum = 0;
-//		pQueryMatchSeq = alignResultArray[0];
-//		for(i=0; i<=targetRow; i++)
-//		{
-//			if(pQueryMatchSeq[i]=='-')
-//				gapNum ++;
-//		}
-//		newRightQueryPos = leftQueryPos + queryLeftShiftLen + targetRow - gapNum;
-//
-//		// get the subject position
-//		gapNum = 0;
-//		pSubjectMatchSeq = alignResultArray[2];
-//		for(i=0; i<=targetRow; i++)
-//		{
-//			if(pSubjectMatchSeq[i]=='-')
-//				gapNum ++;
-//		}
-//		newRightSubjectPos = leftSubjectPos + (subjectLeftShiftLen + targetRow - gapNum) * subjectPosShiftFactor;
-//
-//		// compute the mismatchNumTrimmed, gapNumTrimmed
-//		mismatchNumTrimmed = gapNumTrimmed = 0;
-//		for(i=targetRow+1; i<overlapLen; i++)
-//		{
-//			if(alignResultArray[1][i]!='|')
-//			{
-//				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
-//					gapNumTrimmed ++;
-//				mismatchNumTrimmed ++;
-//			}
-//		}
-//
-//		globalSeg->endQueryPos = newRightQueryPos;
-//		globalSeg->endSubPos = newRightSubjectPos;
-//		globalSeg->matchLen -= overlapLen - 1 - targetRow - mismatchNumTrimmed;
-//		globalSeg->totalMatchLen -= overlapLen - 1 - targetRow;
-//		if(globalSeg->matchLen>globalSeg->totalMatchLen)
-//			globalSeg->matchLen = globalSeg->totalMatchLen;
-//		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
-//		globalSeg->gapNum -= gapNumTrimmed;
-//		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
-//			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
-//	}else
 	if(marginBlockID>=0)
 	{
 		startRow = (marginBlockID - 1) * winSize;
@@ -1848,83 +1857,6 @@ short computeLeftMargin(int64_t *leftMargin, int64_t *leftMarginSubject, char **
 	else
 		subjectPosShiftFactor = -1;
 
-//	if(marginBlockID==-1)
-//	{
-//		startRow = winSize - 1;
-//		endRow = 0;
-//		if(startRow>overlapLen-1)
-//			startRow = overlapLen - 1;
-//		targetRow = -1;
-//		for(i=startRow; i>=endRow; i--)
-//		{
-//			if(pMatchSeq[i]!='|')
-//			{
-//				for(j=i+1; j<overlapLen; j++)
-//				{
-//					if(pMatchSeq[j]=='|')
-//					{
-//						targetRow = j;
-//						break;
-//					}
-//				}
-//				if(targetRow>=0)
-//					break;
-//			}
-//		}
-//		if(targetRow<0)
-//		{
-//			if(i<endRow)
-//				targetRow = endRow;
-//			else
-//			{
-//				printf("line=%d, In %s(), targetRow=%d, error!\n", __LINE__, __func__, targetRow);
-//				return FAILED;
-//			}
-//		}
-//
-//		// get the query position
-//		gapNum = 0;
-//		pQueryMatchSeq = alignResultArray[0];
-//		for(i=overlapLen-1; i>=targetRow; i--)
-//		{
-//			if(pQueryMatchSeq[i]=='-')
-//				gapNum ++;
-//		}
-//		newLeftQueryPos = rightQueryPos - (overlapLen-1+queryRightShiftLen-targetRow) + gapNum;
-//
-//		// get the subject position
-//		gapNum = 0;
-//		pSubjectMatchSeq = alignResultArray[2];
-//		for(i=overlapLen-1; i>=targetRow; i--)
-//		{
-//			if(pSubjectMatchSeq[i]=='-')
-//				gapNum ++;
-//		}
-//		newLeftSubjectPos = rightSubjectPos - (overlapLen-1 + subjectRightShiftLen - targetRow - gapNum) * subjectPosShiftFactor;
-//
-//		// compute the mismatchNumTrimmed, gapNumTrimmed
-//		mismatchNumTrimmed = gapNumTrimmed = 0;
-//		for(i=0; i<targetRow; i++)
-//		{
-//			if(alignResultArray[1][i]!='|')
-//			{
-//				if(alignResultArray[0][i]=='-' || alignResultArray[2][i]=='-')
-//					gapNumTrimmed ++;
-//				mismatchNumTrimmed ++;
-//			}
-//		}
-//
-//		globalSeg->startQueryPos = newLeftQueryPos;
-//		globalSeg->startSubPos = newLeftSubjectPos;
-//		globalSeg->matchLen -= targetRow - mismatchNumTrimmed;
-//		globalSeg->totalMatchLen -= targetRow;
-//		if(globalSeg->matchLen>globalSeg->totalMatchLen)
-//			globalSeg->matchLen = globalSeg->totalMatchLen;
-//		globalSeg->matchPercent = (double)globalSeg->matchLen / globalSeg->totalMatchLen;
-//		globalSeg->gapNum -= gapNumTrimmed;
-//		if(globalSeg->gapNum>globalSeg->totalMatchLen-globalSeg->matchLen)
-//			globalSeg->gapNum = globalSeg->totalMatchLen - globalSeg->matchLen;
-//	}else
 	if(marginBlockID>=0)
 	{
 		startRow = overlapLen - 1 - (marginBlockID - 1) * winSize;
@@ -2027,7 +1959,7 @@ short computeLeftMargin(int64_t *leftMargin, int64_t *leftMarginSubject, char **
  *  @return:
  *   If succeeds, return FAILED; otherwise, return FAILED.
  */
-short computeNormalRatios(double *SP_ratio, double *SMinus_ratio, double *SPlus_ratio, double *discorRatio, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, double insertSize, double standDev)
+short computeNormalRatios(double *SP_ratio, double *SMinus_ratio, double *SPlus_ratio, double *discorRatio, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
 {
 	ratioRegion_t *ratioRegionArray;
 	int32_t i, maxRatioRegionNum, ratioRegionNum, subRegNum, subRegSize;
@@ -2045,7 +1977,7 @@ short computeNormalRatios(double *SP_ratio, double *SMinus_ratio, double *SPlus_
 	{
 		if(queryMatchInfoSet->queryArray[i].queryID==queryMatchInfoSet->maxQueryID || queryMatchInfoSet->queryArray[i].queryID==queryMatchInfoSet->secQueryID)
 		{
-			if(computeNormalRatiosSingleQuery(ratioRegionArray+ratioRegionNum, &subRegNum, subRegSize, queryMatchInfoSet->queryArray+i, readSet, insertSize, standDev)==FAILED)
+			if(computeNormalRatiosSingleQuery(ratioRegionArray+ratioRegionNum, &subRegNum, subRegSize, queryMatchInfoSet->queryArray+i, readSet)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot compute the ratio array for single query, error!\n", __LINE__, __func__);
 				return FAILED;
@@ -2119,7 +2051,7 @@ short prepareRatioRegionArray(ratioRegion_t **ratioRegionArray, int32_t *maxRati
  *  @return:
  *   If succeeds, return FAILED; otherwise, return FAILED.
  */
-short computeNormalRatiosSingleQuery(ratioRegion_t *ratioRegionArray, int32_t *ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short computeNormalRatiosSingleQuery(ratioRegion_t *ratioRegionArray, int32_t *ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet)
 {
 	double SP_ratio, SMinus_ratio, SPlus_ratio, discorRatio;
 
@@ -2133,7 +2065,7 @@ short computeNormalRatiosSingleQuery(ratioRegion_t *ratioRegionArray, int32_t *r
 		}
 
 		// fill the ratioRegion array
-		if(fillRatioRegionArray(ratioRegionArray, *ratioRegionNum, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(fillRatioRegionArray(ratioRegionArray, *ratioRegionNum, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -2159,7 +2091,7 @@ short computeNormalRatiosSingleQuery(ratioRegion_t *ratioRegionArray, int32_t *r
  *  @return:
  *   If succeeds, return FAILED; otherwise, return FAILED.
  */
-short computeBreakpointRatios(query_t *queryItem, int32_t misjoinRegNum, readSet_t *readSet, double insertSize, double standDev)
+short computeBreakpointRatios(query_t *queryItem, int32_t misjoinRegNum, readSet_t *readSet)
 {
 	ratioRegion_t *ratioRegionArray;
 	int32_t ratioRegionNum;
@@ -2176,7 +2108,7 @@ short computeBreakpointRatios(query_t *queryItem, int32_t misjoinRegNum, readSet
 		}
 
 		// fill the ratioRegion array
-		if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -2356,11 +2288,14 @@ short initRatioRegionArrayBreakpoint(ratioRegion_t **ratioRegionArray, int32_t r
 				(*ratioRegionArray)[itemNum].disagreeNum = 0;
 				(*ratioRegionArray)[itemNum].zeroCovNum = 0;
 				(*ratioRegionArray)[itemNum].discorNum = 0;
+				(*ratioRegionArray)[itemNum].multiMapReadsNum = 0;
+				(*ratioRegionArray)[itemNum].totalReadsNum = 0;
 
 				(*ratioRegionArray)[itemNum].SPRatio = -1;
 				(*ratioRegionArray)[itemNum].singleMinusRatio = -1;
 				(*ratioRegionArray)[itemNum].singlePlusRatio = -1;
 				(*ratioRegionArray)[itemNum].discorRatio = -1;
+				(*ratioRegionArray)[itemNum].multiReadsRatio = -1;
 				itemNum ++;
 			}
 
@@ -2379,13 +2314,13 @@ short initRatioRegionArrayBreakpoint(ratioRegion_t **ratioRegionArray, int32_t r
  *  @return:
  *   If succeeds, return FAILED; otherwise, return FAILED.
  */
-short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, query_t *queryItem, readSet_t *readSet)
 {
 	int64_t i, j, queryID, queryID_paired, readID, readID_paired, queryPos, queryPos_paired, orient, orient_paired, seqLen, seqLen_paired;
 	int64_t midPos, regRow, pairedFlag, sideFlag, discorFlag;
-	double fragSize, difFragSize;
-	queryRead_t *queryRead;
-	int32_t *regIDArray, startRow, endRow;
+	double insertSize, standDev, fragSize, difFragSize;
+	queryRead_t *queryRead, *queryReadArray;
+	int32_t setID, *regIDArray, queryReadNum, startRow, endRow, uniqueMapFlag1, uniqueMapFlag2;
 
 	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
 	readMatchInfoBlock_t *readMatchInfoBlockArr;
@@ -2395,6 +2330,9 @@ short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionN
 	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
 	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
 
+	setID = readSet->setID;
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
 
 	// fill the regIDArray
 	regIDArray = (int32_t*) malloc (queryItem->queryLen * sizeof(int32_t));
@@ -2421,14 +2359,19 @@ short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionN
 		else
 			endRow = ratioRegionArray[i].endQPosLHalf - 1;
 
+		ratioRegionArray[i].multiMapReadsNum = 0;
+		ratioRegionArray[i].totalReadsNum = 0;
+
 		for(j=startRow; j<=endRow; j++) regIDArray[j] = i;
 	}
 
 	// fill the reads data
 	queryID = queryItem->queryID;
-	for(i=0; i<queryItem->queryReadNum; i++)
+	queryReadArray = queryItem->queryReadSetArray[setID-1].queryReadArray;
+	queryReadNum = queryItem->queryReadSetArray[setID-1].queryReadNum;
+	for(i=0; i<queryReadNum; i++)
 	{
-		queryRead = queryItem->queryReadArray + i;
+		queryRead = queryReadArray + i;
 
 		readID = queryRead->readID;
 		queryPos = queryRead->queryPos;
@@ -2526,6 +2469,23 @@ short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionN
 
 			if(discorFlag==YES)
 				ratioRegionArray[regRow].discorNum ++;
+
+
+			// get uniqueMap flag
+			if(getUniqueMapFlag(&uniqueMapFlag1, readID, readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot get unique map flag, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+			if(getUniqueMapFlag(&uniqueMapFlag2, readID_paired, readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot get unique map flag, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			if(uniqueMapFlag1==NO && uniqueMapFlag2==NO)
+				ratioRegionArray[regRow].multiMapReadsNum ++;
+			ratioRegionArray[regRow].totalReadsNum ++;
 		}
 	}
 
@@ -2635,6 +2595,12 @@ short computeRatios(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
 			printf("line=%d, In %s(), discorNum=%d, pairedNum=%d, error!\n", __LINE__, __func__, ratioRegionArray[i].discorNum, ratioRegionArray[i].pairedNum);
 			return FAILED;
 		}
+
+		if(ratioRegionArray[i].totalReadsNum>0)
+			ratioRegionArray[i].multiReadsRatio = (double)ratioRegionArray[i].multiMapReadsNum / ratioRegionArray[i].totalReadsNum;
+		else
+			//ratioRegionArray[i].multiReadsRatio = -1;
+			ratioRegionArray[i].multiReadsRatio = 0;
 	}
 
 	// ###################### Debug information #########################
@@ -2651,7 +2617,7 @@ short computeRatios(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
  */
 short updateRatiosInQuery(query_t *queryItem, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
 {
-	int32_t i;
+	int32_t i, leftPos, rightPos;
 	misInfo_t *misInfo;
 	queryMargin_t *queryMargin;
 
@@ -2668,7 +2634,22 @@ short updateRatiosInQuery(query_t *queryItem, ratioRegion_t *ratioRegionArray, i
 				queryMargin->singleMinusRatio = ratioRegionArray[i].singleMinusRatio;
 				queryMargin->singlePlusRatio = ratioRegionArray[i].singlePlusRatio;
 				queryMargin->discorRatio = ratioRegionArray[i].discorRatio;
+				queryMargin->multiReadsRatio = ratioRegionArray[i].multiReadsRatio;
 				queryMargin->discorNum = ratioRegionArray[i].discorNum;
+
+				if(queryMargin->leftMargin<queryMargin->rightMargin)
+				{
+					leftPos = queryMargin->leftMargin;
+					rightPos = queryMargin->rightMargin;
+				}else
+				{
+					leftPos = queryMargin->rightMargin;
+					rightPos = queryMargin->leftMargin;
+				}
+				if(leftPos<2000 || rightPos>queryItem->queryLen-2000)
+					queryMargin->queryEndFlag = YES;
+				else
+					queryMargin->queryEndFlag = NO;
 
 				i ++;
 			}
@@ -2689,7 +2670,7 @@ void outputRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegion
 	if(ratioRegionNum>0)
 	{
 		for(i=0; i<ratioRegionNum; i++)
-			printf("ratioRegionArray[%d]: Left[%d, %d, %d], Right[%d, %d, %d]; SPRatio=%.4f, SMinusRatio=%.4f, SPlusRatio=%.4f, discorRatio=%.4f, pairedNum=%d, singleNum=%d, SMinusNum=%d, SNumLeft=%d, SPlusNum=%d, SNumRight=%d, discorNum=%d\n", i, ratioRegionArray[i].startQPosLHalf, ratioRegionArray[i].endQPosLHalf, ratioRegionArray[i].endQPosLHalf-ratioRegionArray[i].startQPosLHalf+1, ratioRegionArray[i].startQPosRHalf, ratioRegionArray[i].endQPosRHalf, ratioRegionArray[i].endQPosRHalf-ratioRegionArray[i].startQPosRHalf+1, ratioRegionArray[i].SPRatio, ratioRegionArray[i].singleMinusRatio, ratioRegionArray[i].singlePlusRatio, ratioRegionArray[i].discorRatio, ratioRegionArray[i].pairedNum, ratioRegionArray[i].singleNum, ratioRegionArray[i].singleMinusNum, ratioRegionArray[i].singleNumLeftHalf, ratioRegionArray[i].singlePlusNum, ratioRegionArray[i].singleNumRightHalf, ratioRegionArray[i].discorNum);
+			printf("ratioRegionArray[%d]: Left[%d, %d, %d], Right[%d, %d, %d]; SPRatio=%.4f, SMinusRatio=%.4f, SPlusRatio=%.4f, discorRatio=%.4f, multiRatio=%.4f, pairedNum=%d, singleNum=%d, SMinusNum=%d, SNumLeft=%d, SPlusNum=%d, SNumRight=%d, discorNum=%d, multiNum=%d, totalNum=%d\n", i, ratioRegionArray[i].startQPosLHalf, ratioRegionArray[i].endQPosLHalf, ratioRegionArray[i].endQPosLHalf-ratioRegionArray[i].startQPosLHalf+1, ratioRegionArray[i].startQPosRHalf, ratioRegionArray[i].endQPosRHalf, ratioRegionArray[i].endQPosRHalf-ratioRegionArray[i].startQPosRHalf+1, ratioRegionArray[i].SPRatio, ratioRegionArray[i].singleMinusRatio, ratioRegionArray[i].singlePlusRatio, ratioRegionArray[i].discorRatio, ratioRegionArray[i].multiReadsRatio, ratioRegionArray[i].pairedNum, ratioRegionArray[i].singleNum, ratioRegionArray[i].singleMinusNum, ratioRegionArray[i].singleNumLeftHalf, ratioRegionArray[i].singlePlusNum, ratioRegionArray[i].singleNumRightHalf, ratioRegionArray[i].discorNum, ratioRegionArray[i].multiMapReadsNum, ratioRegionArray[i].totalReadsNum);
 	}else
 	{
 		printf("There are no ratio regions.\n");
@@ -2744,9 +2725,11 @@ short determineMisassFlag(query_t *queryItem, int32_t misjoinRegNum, baseCov_t *
 					return FAILED;
 				}
 
-				if(queryMargin->zeroCovNum>3 || ((queryMargin->disagreeNum>=2 || queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3) && (queryMargin->SPRatio>SP_ratio_Thres*3 || (queryMargin->singleMinusRatio>0.7 || queryMargin->singlePlusRatio>0.7) || (queryMargin->discorNum>=3 && queryMargin->discorRatio>0.1))))
+				if(queryMargin->zeroCovNum>3 || ((queryMargin->disagreeNum>1 || queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3) && (/*queryMargin->SPRatio>SP_ratio_Thres*3 || (queryMargin->singleMinusRatio>0.7 || queryMargin->singlePlusRatio>0.7) ||*/ (queryMargin->discorNum>=3 && queryMargin->discorRatio>0.1))))
 					misInfo->misassFlag = queryMargin->misassFlag = TRUE_MISASS;
-				else if(queryMargin->disagreeNum>=2 && (queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3))
+				else if(queryMargin->disagreeNum>1 && (queryMargin->zeroCovNum>0 || queryMargin->highCovRegNum>3 || queryMargin->lowCovRegNum>3))
+					misInfo->misassFlag = queryMargin->misassFlag = TRUE_MISASS;
+				else if(queryMargin->multiReadsRatio>0.15 && queryMargin->queryEndFlag==NO)
 					misInfo->misassFlag = queryMargin->misassFlag = TRUE_MISASS;
 				else
 					misInfo->misassFlag = queryMargin->misassFlag = UNCERTAIN_MISASS;
@@ -2872,7 +2855,13 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 						svNum ++;
 					}else if(misInfo->misassFlag==UNCERTAIN_MISASS)
 					{
-						strcpy(misKindStr, "uncertain");
+						switch(misassSeq->misassKind)
+						{
+							case UNCER_MISJOIN: strcpy(misKindStr, "uncertain_misjoin"); break;
+							case UNCER_INSERT: strcpy(misKindStr, "uncertain_insertion"); break;
+							case UNCER_DEL: strcpy(misKindStr, "uncertain_deletion"); break;
+							default: printf("line=%d, In %s(), invalid error kind=%d, error!\n", __LINE__, __func__, misassSeq->misassKind); return FAILED;
+						}
 
 						fprintf(fpUncertain, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", queryItem->queryTitle, misKindStr, misassSeq->startQueryPos, misassSeq->endQueryPos, misassSeq->startSubjectPos, misassSeq->endSubjectPos, subjectTitle);
 						warningNum ++;
@@ -2890,8 +2879,8 @@ short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, 
 		}
 	}
 
-	printf("**** In summary, the statistics are as follows ****\n");
-	printf("Number of mis-assemblies                : %d\n", errNum);
+	printf("\nMis-assembly statistics:\n");
+	printf("Number of mis-assemblies errors         : %d\n", errNum);
 	printf("Number of correct assemblies due to SVs : %d\n", svNum);
 	printf("Number of mis-assemblies in gap regions : %d\n", gapNum);
 	printf("Number of warnings                      : %d\n", warningNum);
@@ -2929,7 +2918,7 @@ short saveNewQueries(char *newQueryFile, queryMatchInfo_t *queryMatchInfoSet)
 	{
 		queryItem = queryMatchInfoSet->queryArray + i;
 
-		if(queryItem->misassFlag==TRUE_MISASS)
+		if(queryItem->newQuerySeqList)
 		{
 			newID = 1;
 			querySeqNode = queryItem->newQuerySeqList;

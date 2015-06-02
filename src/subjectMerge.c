@@ -14,24 +14,28 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short mergeRefSegmentsFasta(const char *mergedSegFile, const char *mergeSubjectsFile)
+short mergeRefSegmentsFasta(char *mergedSegFile, char *subjectsFile)
 {
-	// initialize the memory for reference segments mergence
-	if(initMemRefSegmentsFasta(mergeSubjectsFile)==FAILED)
+	char **segFileArray;
+	int32_t segFileNum;
+
+
+	// initialize the memory for reference segments merge
+	if(initMemRefSegmentsFasta(&segFileArray, &segFileNum, subjectsFile)==FAILED)
 	{
-		printf("line=%d, In %s(), cannot initialize the memory for reference segments mergence, error!\n", __LINE__, __func__);
+		printf("line=%d, In %s(), cannot initialize the memory for reference segments merge, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// merge reference segments
-	if(mergeRefSegsFasta(mergedSegFile, segFileArr, segFileNum)==FAILED)
+	if(mergeRefSegsFasta(mergedSegFile, segFileArray, segFileNum)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot merge segments in fasta, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// free memory for reference segments merging
-	freeMemRefSegmentsFasta();
+	freeMemRefSegmentsFasta(segFileArray, segFileNum);
 
 	return SUCCESSFUL;
 }
@@ -41,46 +45,46 @@ short mergeRefSegmentsFasta(const char *mergedSegFile, const char *mergeSubjects
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initMemRefSegmentsFasta(const char *mergeSubjectsFile)
+short initMemRefSegmentsFasta(char ***segFileArray, int32_t *segFileNum, char *subjectsFile)
 {
 	FILE *fpSubjects;
 	char line[LINE_CHAR_MAX+1];
 	int fileStatus, len;
-	int64_t tmpFileNum;
+	int32_t tmpFileNum;
 
 	// get the total segment number
-	if(getSegmentFileNum(&segFileNum, mergeSubjectsFile)==FAILED)
+	if(getSegmentFileNum(segFileNum, subjectsFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot get the segment file number, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
-	if(segFileNum<=0)
+	if((*segFileNum)<=0)
 	{
-		printf("There are no segment files in [ %s ], please configure the segment files first.\n", mergeSubjectsFile);
+		printf("There are no segment files in [ %s ], please configure the segment files first.\n", subjectsFile);
 		return FAILED;
 	}
 
 	// allocate the segment file memory
-	segFileArr = (char **) malloc (segFileNum * sizeof(char*));
-	if(segFileArr==NULL)
+	*segFileArray = (char **) calloc (*segFileNum, sizeof(char*));
+	if((*segFileArray)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
-	for(tmpFileNum=0; tmpFileNum<segFileNum; tmpFileNum++)
+	for(tmpFileNum=0; tmpFileNum<*segFileNum; tmpFileNum++)
 	{
-		segFileArr[tmpFileNum] = (char *) calloc (LINE_CHAR_MAX+1, sizeof(char));
-		if(segFileArr[tmpFileNum]==NULL)
+		(*segFileArray)[tmpFileNum] = (char *) calloc (LINE_CHAR_MAX+1, sizeof(char));
+		if((*segFileArray)[tmpFileNum]==NULL)
 		{
 			printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 	}
 
-	fpSubjects = fopen(mergeSubjectsFile, "r");
+	fpSubjects = fopen(subjectsFile, "r");
 	if(fpSubjects==NULL)
 	{
-		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, mergeSubjectsFile);
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, subjectsFile);
 		return FAILED;
 	}
 
@@ -101,7 +105,7 @@ short initMemRefSegmentsFasta(const char *mergeSubjectsFile)
 				continue;
 		}
 
-		strcpy(segFileArr[tmpFileNum], line);
+		strcpy((*segFileArray)[tmpFileNum], line);
 		tmpFileNum ++;
 	}
 
@@ -109,10 +113,9 @@ short initMemRefSegmentsFasta(const char *mergeSubjectsFile)
 	fpSubjects = NULL;
 
 	// ####################### Debug information #######################
-	if(tmpFileNum!=segFileNum)
+	if(tmpFileNum!=(*segFileNum))
 	{
-		printf("line=%d, In %s(), tmpFileNum=%ld !=segFileNum=%ld, error!\n", __LINE__, __func__, tmpFileNum, segFileNum);
-		freeMemRefSegmentsFasta();
+		printf("line=%d, In %s(), tmpFileNum=%d !=segFileNum=%d, error!\n", __LINE__, __func__, tmpFileNum, *segFileNum);
 		return FAILED;
 	}
 	// ####################### Debug information #######################
@@ -123,36 +126,34 @@ short initMemRefSegmentsFasta(const char *mergeSubjectsFile)
 /**
  * Release the memory of global parameters.
  */
-void freeMemRefSegmentsFasta()
+void freeMemRefSegmentsFasta(char **segFileArray, int32_t segFileNum)
 {
-	int64_t i;
+	int32_t i;
 
 	for(i=0; i<segFileNum; i++)
 	{
-		free(segFileArr[i]);
-		segFileArr[i] = NULL;
+		free(segFileArray[i]);
+		segFileArray[i] = NULL;
 	}
-	free(segFileArr);
-	segFileArr = NULL;
-
-	segFileNum = 0;
+	free(segFileArray);
+	segFileArray = NULL;
 }
 
 /**
- * Get the subject segments file number in mergeSubjectsFile.
+ * Get the subject segments file number in subjectsFile.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getSegmentFileNum(int64_t *segmentFileNum, const char *mergeSubjectsFileName)
+short getSegmentFileNum(int32_t *segmentFileNum, const char *subjectsFileName)
 {
 	FILE *fpSubjects;
 	char line[LINE_CHAR_MAX+1];
 	int fileStatus, len;
 
-	fpSubjects = fopen(mergeSubjectsFileName, "r");
+	fpSubjects = fopen(subjectsFileName, "r");
 	if(fpSubjects==NULL)
 	{
-		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, mergeSubjectsFileName);
+		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, subjectsFileName);
 		return FAILED;
 	}
 
@@ -370,7 +371,7 @@ short fillSubjectSeqs(queryMatchInfo_t *queryMatchInfoSet, char *mergedSegFile)
 {
 	int64_t i, maxSubjectLen, subjectID, subjectLen, returnFlag;
 	subject_t *subjectArray;
-	char *subjectSeq, subjectHeadTitle[1000];
+	char *subjectSeq, subjectHeadTitle[1000], *pch;
 	FILE *fpSubject;
 
 	fpSubject = fopen(mergedSegFile, "r");
@@ -397,6 +398,18 @@ short fillSubjectSeqs(queryMatchInfo_t *queryMatchInfoSet, char *mergedSegFile)
 	subjectID = 1;
 	while((returnFlag=getSingleFastaItemFromFile(fpSubject, subjectHeadTitle, subjectSeq, &subjectLen))==SUCCESSFUL)
 	{
+		// trim head title after space or tab character
+		pch = subjectHeadTitle;
+		while(*pch)
+		{
+			if((*pch)==' ' || (*pch)=='\t')
+			{
+				*pch = '\0';
+				break;
+			}
+			pch ++;
+		}
+
 		if(strcmp(subjectHeadTitle, subjectArray[subjectID-1].subjectTitle)==0)
 		{
 			subjectArray[subjectID-1].subjectSeq = (char*) calloc (subjectArray[subjectID-1].subjectLen+1, sizeof(char));

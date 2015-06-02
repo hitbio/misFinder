@@ -14,12 +14,39 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short mapReads(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex, double insertSize, double standDev)
+short mapReads(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, queryIndex_t *queryIndex, int32_t threadNum)
 {
 	struct timeval tpstart, tpend;
 	double timeused_align;
 	gettimeofday(&tpstart, NULL);
 
+	int32_t i;
+
+	for(i=0; i<readSetArray->readSetNum; i++)
+	{
+		if(mapReadsSingleReadset(queryMatchInfoSet, readSetArray->readSetArray+i, queryIndex, threadNum)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot align reads to queries, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+	}
+
+	// calculate aligning time
+	gettimeofday(&tpend, NULL);
+	timeused_align = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
+
+	printf("Align reads used time: %.2f seconds.\n", timeused_align);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Map the reads.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short mapReadsSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex, int32_t threadNum)
+{
 	// initialize read blocks
 	if(initReadMatchInfoBlockInReadset(readSet)==FAILED)
 	{
@@ -34,28 +61,36 @@ short mapReads(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryInd
 		return FAILED;
 	}
 
+	// initialize the data for threads
+	if(initThreadParasMap(&threadArr, &threadParaArr, threadNum, queryMatchInfoSet, readSet, queryIndex)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize map threads, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
 	// map reads uniquely
-	if(mapReadsOp(queryMatchInfoSet, readSet, queryIndex, insertSize, standDev, YES)==FAILED)
+	if(mapReadsOp(threadArr, threadParaArr, threadNum, YES)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot map reads uniquely, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// map reads non-uniquely
-	if(mapReadsOp(queryMatchInfoSet, readSet, queryIndex, insertSize, standDev, NO)==FAILED)
+	if(mapReadsOp(threadArr, threadParaArr, threadNum, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot map reads uniquely, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
+	// free memory for thread parameters
+	if(freeThreadParasMap(&threadArr, &threadParaArr, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot free the thread parameters, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
 	// free coverage flag array
 	freeCovFlagArray(queryMatchInfoSet);
-
-	// calculate aligning time
-	gettimeofday(&tpend, NULL);
-	timeused_align = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
-
-	printf("Aligning reads used time: %.2f seconds.\n", timeused_align);
 
 	return SUCCESSFUL;
 }
@@ -102,11 +137,292 @@ void freeCovFlagArray(queryMatchInfo_t *queryMatchInfoSet)
 }
 
 /**
+ * Initialize the thread parameters for reads mapping.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short initThreadParasMap(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex)
+{
+	int32_t i, subItemNum, totalReadsNum, total;
+
+	*threadArray = (pthread_t*) calloc (threadNum, sizeof(pthread_t));
+	if((*threadArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	*threadParaArray = (threadPara_t*) calloc (threadNum, sizeof(threadPara_t));
+	if((*threadParaArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	totalReadsNum = readSet->totalItemNumRead;
+	subItemNum = (totalReadsNum - 1) / threadNum + 1;
+	if(subItemNum%2==1)
+		subItemNum ++;
+
+	total = 0;
+	for(i=0; i<threadNum; i++)
+	{
+		if(total<totalReadsNum)
+		{
+			(*threadParaArray)[i].startReadID = total + 1;
+			if(total+subItemNum<=totalReadsNum)
+				(*threadParaArray)[i].endReadID = total + subItemNum;
+			else
+				(*threadParaArray)[i].endReadID = totalReadsNum;
+			(*threadParaArray)[i].itemNumRead = (*threadParaArray)[i].endReadID - (*threadParaArray)[i].startReadID + 1;
+
+			(*threadParaArray)[i].queryMatchInfoSet = queryMatchInfoSet;
+			(*threadParaArray)[i].readSet = readSet;
+			(*threadParaArray)[i].queryIndex = queryIndex;
+
+			(*threadParaArray)[i].validFlag = YES;
+
+			total += subItemNum;
+		}else
+			(*threadParaArray)[i].validFlag = NO;
+
+		(*threadParaArray)[i].successFlag = NO;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Free the thread parameters for reads mapping.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short freeThreadParasMap(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum)
+{
+	int32_t i;
+
+	for(i=0; i<threadNum; i++)
+	{
+		if((*threadParaArray)[i].validFlag==YES)
+		{
+			(*threadParaArray)[i].queryMatchInfoSet = NULL;
+			(*threadParaArray)[i].readSet = NULL;
+			(*threadParaArray)[i].queryIndex = NULL;
+
+			(*threadParaArray)[i].lockArray = NULL;
+			(*threadParaArray)[i].lockArraySize = 0;
+		}
+	}
+
+	free(*threadArray);
+	*threadArray = NULL;
+
+	free(*threadParaArray);
+	*threadParaArray = NULL;
+
+	return SUCCESSFUL;
+}
+
+/**
  * Start the reads map.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex, double insertSize, double standDev, int32_t uniqueMapOpFlag)
+short mapReadsOp(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum, int32_t uniqueMapOpFlag)
+{
+	readSet_t *readSet;
+
+	readSet = threadParaArray[0].readSet;
+
+	// initialize mutex
+	if(initMutexMemMap(threadParaArray, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize memory thread mutex for reads mapping, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// start multiple threads
+	if(createThreadsMap(threadArray, threadParaArray, threadNum, uniqueMapOpFlag)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot create threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	if(waitThreads(threadArray, threadParaArray, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot wait threads, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// free mutex
+	if(freeMutexMemMap(threadParaArray, threadNum)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot free the memory for thread mutex for reads mapping, error.\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// calculate the total aligned reads
+	if(uniqueMapOpFlag==NO)
+	{
+		if(computeTotalAlignedReadsNum(readSet)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot compute the total aligned reads count, error.\n", __LINE__, __func__);
+			return FAILED;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Initialize the mutex memory for threads for reads mapping.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short initMutexMemMap(threadPara_t *threadParaArray, int32_t threadNum)
+{
+	ctrlLock_t *lockArray;
+	int32_t i, lockArraySize;
+
+	// initialize mutex
+	lockArraySize = threadParaArray[0].queryMatchInfoSet->itemNumQueryArray;
+	lockArray = (ctrlLock_t*) calloc (lockArraySize, sizeof(ctrlLock_t));
+	if(lockArray==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	for(i=0; i<lockArraySize; i++)
+	{
+		lockArray[i].readerCnt = 0;
+		lockArray[i].writerCnt = 0;
+
+		pthread_mutex_init(&lockArray[i].accessReaderCnt, NULL);
+		pthread_mutex_init(&lockArray[i].accessWriterCnt, NULL);
+		pthread_mutex_init(&lockArray[i].writeLock, NULL);
+		pthread_mutex_init(&lockArray[i].readerLock, NULL);
+		pthread_mutex_init(&lockArray[i].outerLock, NULL);
+	}
+
+	for(i=0; i<threadNum; i++)
+	{
+		threadParaArray[i].lockArray = lockArray;
+		threadParaArray[i].lockArraySize = lockArraySize;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Free the mutex memory for threads for reads mapping.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short freeMutexMemMap(threadPara_t *threadParaArray, int32_t threadNum)
+{
+	ctrlLock_t *lockArray;
+	int32_t i, lockArraySize;
+
+	lockArray = threadParaArray[0].lockArray;
+	lockArraySize = threadParaArray[0].lockArraySize;
+
+	for(i=0; i<lockArraySize; i++)
+	{
+		lockArray[i].readerCnt = 0;
+		lockArray[i].writerCnt = 0;
+
+		pthread_mutex_init(&lockArray[i].accessReaderCnt, NULL);
+		pthread_mutex_init(&lockArray[i].accessWriterCnt, NULL);
+		pthread_mutex_init(&lockArray[i].writeLock, NULL);
+		pthread_mutex_init(&lockArray[i].readerLock, NULL);
+		pthread_mutex_init(&lockArray[i].outerLock, NULL);
+	}
+
+	for(i=0; i<threadNum; i++)
+	{
+		threadParaArray[0].lockArray = NULL;
+		threadParaArray[0].lockArraySize = 0;
+	}
+	free(lockArray);
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute total aligned reads count.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short computeTotalAlignedReadsNum(readSet_t *readSet)
+{
+	int32_t i, j;
+	readBlock_t *readBlock;
+	readMatchInfoBlock_t *readMatchInfoBlock;
+	readMatchInfo_t *pReadMatchInfo;
+
+	readSet->totalValidItemNumReadMatchInfo = 0;
+	for(i=0; i<readSet->blocksNumRead; i++)
+	{
+		readBlock = readSet->readBlockArr + i;
+		readMatchInfoBlock = readSet->readMatchInfoBlockArr + i;
+		for(j=0; j<readBlock->itemNum; j++)
+		{
+			pReadMatchInfo = readMatchInfoBlock->readMatchInfoArr + j;
+			if(pReadMatchInfo->queryID>0)
+				readSet->totalValidItemNumReadMatchInfo ++;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Create the threads for reads mapping.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
+ */
+short createThreadsMap(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum, int32_t uniqueMapOpFlag)
+{
+	int32_t i, ret, validNum;
+
+	if(uniqueMapOpFlag==YES)
+	{
+		validNum = 0;
+		for(i=0; i<threadNum; i++)
+			if(threadParaArray[i].validFlag==YES)
+				validNum ++;
+		printf("The reads alignment will be performed using %d threads.\n", validNum);
+	}
+
+	if(uniqueMapOpFlag==YES)
+		printf("Aligning reads uniquely ...\n");
+	else
+		printf("Aligning reads of multiple occurrences ...\n");
+
+	for(i=0; i<threadNum; i++)
+	{
+		if(threadParaArray[i].validFlag==YES)
+		{
+			threadParaArray[i].uniqueMapOpFlag = uniqueMapOpFlag;
+			ret = pthread_create(threadArray+i, NULL, (void  *) mapReadsOpSingleThread, threadParaArray+i);
+			if(ret!=0)
+			{
+				printf("line=%d, In %s(), cannot create threads for reads mapping, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Start the reads map using single thread.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+void mapReadsOpSingleThread(threadPara_t *threadPara)
 {
 	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2];
 	readBlock_t *pReadBlockArray;
@@ -118,50 +434,79 @@ short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryI
 	readMatchInfo_t *pReadMatchInfo;
 	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
 
-	if(uniqueMapOpFlag==YES)
-		printf("Aligning reads uniquely ...\n");
-	else
-		printf("Aligning reads of multiple occurrences ...\n");
+	queryMatchInfo_t *queryMatchInfoSet;
+	readSet_t *readSet;
+	queryIndex_t *queryIndex;
+	double insertSize, standDev;
+	int32_t uniqueMapOpFlag, matedNum, uniqueMapFlagArray[2];
+
+	int64_t startReadID, endReadID;
+	int32_t startReadBlockID, endReadBlockID, startRowInReadBlock, endRowInReadBlock;
+
+	// get parameters from threadPara
+	queryMatchInfoSet = threadPara->queryMatchInfoSet;
+	readSet = threadPara->readSet;
+	queryIndex = threadPara->queryIndex;
+	uniqueMapOpFlag = threadPara->uniqueMapOpFlag;
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
+	startReadID = threadPara->startReadID;
+	endReadID = threadPara->endReadID;
 
 	// the match result array
 	if(getMaxArraySizeFromQueryIndex(&maxArraySize, queryIndex)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot get the maximal array size from query index, error!\n", __LINE__, __func__);
-		return FAILED;
+		return;
 	}
 	if(maxArraySize<=0)
 	{
 		printf("line=%d, In %s(), invalid array size %d, error!\n", __LINE__, __func__, maxArraySize);
-		return FAILED;
+		return;
 	}
 
-	matchResultArrays[0] = (alignMatchItem_t*) calloc (4*maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrays[1] = (alignMatchItem_t*) calloc (4*maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrayBuf1 = (alignMatchItem_t*) calloc (4*maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrayBuf2 = (alignMatchItem_t*) calloc (4*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrays[0] = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrays[1] = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrayBuf1 = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrayBuf2 = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
 	if(matchResultArrays[0]==NULL || matchResultArrays[1]==NULL || matchResultArrayBuf1==NULL || matchResultArrayBuf2==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
-		return FAILED;
+		return;
 	}
+
 
 	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
 	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
 
-	// map unique reads
-	rid = 0;
-	for(i=0; i<readSet->blocksNumRead; i++)
+	// map reads
+	startReadBlockID = (startReadID - 1) / readSet->maxItemNumPerReadBlock + 1;
+	endReadBlockID = (endReadID - 1) / readSet->maxItemNumPerReadBlock + 1;
+
+	rid = startReadID;
+	for(i=startReadBlockID-1; i<=endReadBlockID-1; i++)
 	{
 		pReadBlockArray = readSet->readBlockArr + i;
 		pReadArray = pReadBlockArray->readArr;
 
-		for(j=0; j<pReadBlockArray->itemNum; j++)
+		startRowInReadBlock = (rid - 1) % readSet->maxItemNumPerReadBlock;
+		if(i==endReadBlockID-1)
+			endRowInReadBlock = (endReadID - 1) % readSet->maxItemNumPerReadBlock;
+		else
+			endRowInReadBlock = pReadBlockArray->itemNum - 1;
+
+		if(endRowInReadBlock>pReadBlockArray->itemNum-1)
 		{
-			rid ++;
+			printf("line=%d, In %s(), endRowInReadBlock=%d, lastRow=%d, cannot allocate memory, error!\n", __LINE__, __func__, endRowInReadBlock, pReadBlockArray->itemNum-1);
+			return;
+		}
+
+		for(j=startRowInReadBlock; j<=endRowInReadBlock; j++, rid++)
+		{
 			pRead = pReadArray + j;
 			seqLen = pRead->seqlen;
 
-//			if(rid==1320867)
+//			if(rid==1918838 || rid==1565684)
 //			{
 //				printf("rid=%ld, seqLen=%d\n", rid, seqLen);
 //			}
@@ -183,34 +528,57 @@ short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryI
 				if(mapSingleReadToQueries(rid, pRead, readSet, matchResultArray, matchResultArrayBuf1, matchResultArrayBuf2, matchItemNum, queryIndex, queryMatchInfoSet->queryArray, 5)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot map the read %lu, error!\n", __LINE__, __func__, rid);
-					return FAILED;
+					return;
 				}
 			}
 
 			if(rid%2==0)
 			{
+				if(getMatedNumAlignResult(&matedNum, matchResultArrays[0], matchResultArrays[1], matchItemNums[0], matchItemNums[1], (pRead-1)->seqlen, pRead->seqlen, insertSize, standDev)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot get the match information of paired-ends, error!\n", __LINE__, __func__);
+					return;
+				}
+
+				if(matedNum==0 && (pRead-1)->successMapFlag==NO && pRead->successMapFlag==NO)
+				{
+					// get more align items from unmated paired ends
+					if(getMoreAlignItemsFromUnmatedPE(&matedNum, rid-1, rid, matchResultArrays[0], matchResultArrays[1], matchItemNums, matchItemNums+1, 3, queryMatchInfoSet, readSet)==FAILED)
+					{
+						printf("line=%d, In %s(), cannot get more align items from unmated paired ends, error!\n", __LINE__, __func__);
+						return;
+					}
+				}
+
+				// compute unique map flag
+				if(computeUniqueMapFlags(uniqueMapFlagArray, matedNum, matchResultArrays[0], matchResultArrays[1], matchItemNums[0], matchItemNums[1])==FAILED)
+				{
+					printf("line=%d, In %s(), cannot compute unique map flags for ends, error!\n", __LINE__, __func__);
+					return;
+				}
+
 				// select the mated match information
 				if(matchItemNums[0]>0 && matchItemNums[1]>0 && (matchItemNums[0]>=2 || matchItemNums[1]>=2))
 				{
-					if(selectMatedMatchPosPE(matchResultArrays[0], matchResultArrays[1], matchItemNums, matchItemNums+1, (pRead-1)->seqlen, pRead->seqlen, insertSize, standDev, uniqueMapOpFlag, queryMatchInfoSet)==FAILED)
+					if(selectMatedMatchPosPE(matchResultArrays[0], matchResultArrays[1], matchItemNums, matchItemNums+1, matedNum, (pRead-1)->seqlen, pRead->seqlen, insertSize, standDev, uniqueMapOpFlag, queryMatchInfoSet, threadPara)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot adjust the match information of paired-ends, error!\n", __LINE__, __func__);
-						return FAILED;
+						return;
 					}
 				}else if((matchItemNums[0]>=2 && matchItemNums[1]==0) || (matchItemNums[0]==0 && matchItemNums[1]>=2))
 				{
 					// select best alignment for single read
-					if(selectBestAlignInfoSingleRead(matchResultArrays[0], matchItemNums, uniqueMapOpFlag, queryMatchInfoSet)==FAILED)
+					if(selectBestAlignInfoSingleRead(matchResultArrays[0], matchItemNums, uniqueMapOpFlag, queryMatchInfoSet, threadPara)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot select the best alignment information for single read, error!\n", __LINE__, __func__);
-						return FAILED;
+						return;
 					}
 
 					// select best alignment for single read
-					if(selectBestAlignInfoSingleRead(matchResultArrays[1], matchItemNums+1, uniqueMapOpFlag, queryMatchInfoSet)==FAILED)
+					if(selectBestAlignInfoSingleRead(matchResultArrays[1], matchItemNums+1, uniqueMapOpFlag, queryMatchInfoSet, threadPara)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot select the best alignment information for single read, error!\n", __LINE__, __func__);
-						return FAILED;
+						return;
 					}
 				}
 
@@ -235,7 +603,6 @@ short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryI
 						rowNumInReadMatchInfoBlock = (tmpRid - 1) % maxItemNumPerReadMatchInfoBlock;
 						pReadMatchInfo = readMatchInfoBlockArr[readMatchInfoBlockID].readMatchInfoArr + rowNumInReadMatchInfoBlock;
 						readMatchInfoBlockArr[readMatchInfoBlockID].itemNum ++;
-						readSet->totalValidItemNumReadMatchInfo ++;
 
 						pReadMatchInfo->queryID = matchResultArray[0].queryID;
 						pReadMatchInfo->queryPos = matchResultArray[0].queryPos;
@@ -246,14 +613,13 @@ short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryI
 						pReadMatchInfo->readOrientation = matchResultArray[0].orientation;
 
 						pRead->successMapFlag = YES;
-						pRead->uniqueMapFlag = uniqueMapOpFlag;
-						queryMatchInfoSet->queryArray[pReadMatchInfo->queryID-1].queryReadNum ++;
+						pRead->uniqueMapFlag = uniqueMapFlagArray[k];
 
 						// update coverage flag
-						if(updateQueryCovFlag(queryMatchInfoSet, matchResultArray)==FAILED)
+						if(updateQueryCovFlag(queryMatchInfoSet, matchResultArray, threadPara)==FAILED)
 						{
 							printf("line=%d, In %s(), cannot update query coverage flag, error!\n", __LINE__, __func__);
-							return FAILED;
+							return;
 						}
 
 /*
@@ -302,7 +668,7 @@ short mapReadsOp(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryI
 	free(matchResultArrayBuf1);
 	free(matchResultArrayBuf2);
 
-	return SUCCESSFUL;
+	threadPara->successFlag = SUCCESSFUL;
 }
 
 /**
@@ -338,7 +704,31 @@ short getMaxArraySizeFromQueryIndex(int32_t *maxArraySize, queryIndex_t *queryIn
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short estimateInsertSize(double *insertSize, double *standDev, readSet_t *readSet, queryIndex_t *queryIndex)
+short estimateInsertSize(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, queryIndex_t *queryIndex)
+{
+	int32_t i;
+
+	for(i=0; i<readSetArray->readSetNum; i++)
+	{
+		if(readSetArray->readSetArray[i].pairedMode==1 || readSetArray->readSetArray[i].pairedMode==2)
+		{
+			if(estimateInsertSizeSingleReadset(queryMatchInfoSet, readSetArray->readSetArray+i, queryIndex)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot estimate the insert size, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Estimate the insert size.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex)
 {
 	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2];
 	readBlock_t *pReadBlockArray;
@@ -360,10 +750,10 @@ short estimateInsertSize(double *insertSize, double *standDev, readSet_t *readSe
 		return FAILED;
 	}
 
-	matchResultArrays[0] = (alignMatchItem_t*) calloc (2*maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrays[1] = (alignMatchItem_t*) calloc (2*maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrayBuf1 = (alignMatchItem_t*) calloc (maxArraySize, sizeof(alignMatchItem_t));
-	matchResultArrayBuf2 = (alignMatchItem_t*) calloc (maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrays[0] = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrays[1] = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrayBuf1 = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
+	matchResultArrayBuf2 = (alignMatchItem_t*) calloc (4*queryIndex->kmerSize*maxArraySize, sizeof(alignMatchItem_t));
 	if(matchResultArrays[0]==NULL || matchResultArrays[1]==NULL || matchResultArrayBuf1==NULL || matchResultArrayBuf2==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
@@ -474,15 +864,15 @@ short estimateInsertSize(double *insertSize, double *standDev, readSet_t *readSe
 		}
 	}
 
-	*insertSize = insertSizeTmp;
-	*standDev = standDevTmp;
-
 	free(matchResultArrays[0]);
 	free(matchResultArrays[1]);
 	free(matchResultArrayBuf1);
 	free(matchResultArrayBuf2);
 
-	printf("insertSize=%.4f, SDev=%.4f\n", *insertSize, *standDev);
+	readSet->insertSize = insertSizeTmp;
+	readSet->standDev = standDevTmp;
+
+	printf("insertSize=%.4f, SDev=%.4f\n", readSet->insertSize, readSet->standDev);
 
 	return SUCCESSFUL;
 }
@@ -598,7 +988,7 @@ short getMatchedQueryPosPerfect(alignMatchItem_t *matchResultArray, alignMatchIt
 	int32_t i, j, k, entriesNumRead, baseNumLastEntryRead, matchItemNum1, matchItemNum2, newMatchItemNum1, validItemNum, mapTimes, startBasePos;
 	uint64_t hashcode, kmerSeqInt[queryIndex->entriesPerKmer];
 	queryKmer_t *kmer;
-	int32_t matchDistance, matchFlag, startRow, endRow;
+	int32_t matchDistance, matchFlag, startRow, endRow, shiftBaseNum;
 
 	entriesNumRead = ((seqLen - 1) >> 5) + 1;
 	baseNumLastEntryRead = ((seqLen - 1) % 32) + 1;
@@ -608,145 +998,148 @@ short getMatchedQueryPosPerfect(alignMatchItem_t *matchResultArray, alignMatchIt
 	newMatchItemNum1 = 0;
 	if(seqLen>=queryIndex->kmerSize)
 	{
-		startBasePos = 0;
-
-		// generate the kmer integer sequence
-		if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
+		for(shiftBaseNum=0; shiftBaseNum<queryIndex->kmerSize; shiftBaseNum++)
 		{
-			printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
-			return FAILED;
-		}
+			startBasePos = shiftBaseNum;
 
-		// get the kmer
-		hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
-		kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
-
-		// record the match information
-		if(kmer==NULL)
-		{
-			matchItemNum1 = 0;
-		}else
-		{
-			matchItemNum1 = kmer->arraysize;
-			for(j=0; j<matchItemNum1; j++)
+			// generate the kmer integer sequence
+			if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
 			{
-				matchResultArrayBuf1[j].queryID = kmer->ppos[j].queryID;
-				matchResultArrayBuf1[j].queryPos = kmer->ppos[j].queryPos;
-				matchResultArrayBuf1[j].mismatchNum = 0;
-				matchResultArrayBuf1[j].validFlag = YES;
+				printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
+				return FAILED;
 			}
 
-			// process the other bases
-			validItemNum = matchItemNum1;
-			for(i=1; i<mapTimes && validItemNum>0; i++)
+			// get the kmer
+			hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
+			kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
+
+			// record the match information
+			if(kmer==NULL)
 			{
-				if(i<mapTimes-1)
+				matchItemNum1 = 0;
+			}else
+			{
+				matchItemNum1 = kmer->arraysize;
+				for(j=0; j<matchItemNum1; j++)
 				{
-					startBasePos += queryIndex->kmerSize;
-					matchDistance = startBasePos;
-				}else
-				{
-					startBasePos = seqLen - queryIndex->kmerSize;
-					matchDistance = startBasePos;
+					matchResultArrayBuf1[j].queryID = kmer->ppos[j].queryID;
+					matchResultArrayBuf1[j].queryPos = kmer->ppos[j].queryPos;
+					matchResultArrayBuf1[j].mismatchNum = 0;
+					matchResultArrayBuf1[j].validFlag = YES;
 				}
 
-				// generate the kmer integer sequence
-				if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
+				// process the other bases
+				validItemNum = matchItemNum1;
+				for(i=1; i<mapTimes && validItemNum>0; i++)
 				{
-					printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
-					return FAILED;
-				}
-
-				// get the kmer
-				hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
-				kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
-
-				// record the match information
-				if(kmer==NULL)
-				{
-					matchItemNum2 = 0;
-				}else
-				{
-					matchItemNum2 = kmer->arraysize;
-					for(j=0; j<matchItemNum2; j++)
+					if(i<mapTimes-1)
 					{
-						matchResultArrayBuf2[j].queryID = kmer->ppos[j].queryID;
-						matchResultArrayBuf2[j].queryPos = kmer->ppos[j].queryPos;
-						matchResultArrayBuf2[j].mismatchNum = 0;
+						startBasePos += queryIndex->kmerSize;
+						matchDistance = startBasePos;
+					}else
+					{
+						startBasePos = seqLen - queryIndex->kmerSize;
+						matchDistance = startBasePos;
 					}
-				}
 
-				// get the intersection
-				if(matchItemNum2==0)
+					// generate the kmer integer sequence
+					if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
+					{
+						printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+
+					// get the kmer
+					hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
+					kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
+
+					// record the match information
+					if(kmer==NULL)
+					{
+						matchItemNum2 = 0;
+					}else
+					{
+						matchItemNum2 = kmer->arraysize;
+						for(j=0; j<matchItemNum2; j++)
+						{
+							matchResultArrayBuf2[j].queryID = kmer->ppos[j].queryID;
+							matchResultArrayBuf2[j].queryPos = kmer->ppos[j].queryPos;
+							matchResultArrayBuf2[j].mismatchNum = 0;
+						}
+					}
+
+					// get the intersection
+					if(matchItemNum2==0)
+					{
+						matchItemNum1 = 0;
+						validItemNum = 0;
+						break;
+					}else if(matchItemNum2>0)
+					{
+						for(j=0; j<matchItemNum1; j++)
+						{
+							if(matchResultArrayBuf1[j].validFlag==YES)
+							{
+								matchFlag = NO;
+
+								// get the startRow and endRow of Buf2
+								if(matchItemNum2>20)
+								{
+									if(getRowRangeMatchArray(&startRow, &endRow, matchResultArrayBuf2, matchItemNum2, matchResultArrayBuf1[j].queryID)==FAILED)
+									{
+										printf("line=%d, In %s(), cannot get the array range, error!\n", __LINE__, __func__);
+										return FAILED;
+									}
+								}
+								else
+								{
+									startRow = 0;
+									endRow = matchItemNum2 - 1;
+								}
+
+								if(startRow>=0 && endRow>=0)
+								{
+									for(k=startRow; k<=endRow; k++)
+									{
+										if(matchResultArrayBuf1[j].queryID==matchResultArrayBuf2[k].queryID && matchResultArrayBuf1[j].queryPos+matchDistance==matchResultArrayBuf2[k].queryPos)
+										{
+											matchFlag = YES;
+											break;
+										}
+									}
+								}
+
+								if(matchFlag==NO)
+								{
+									matchResultArrayBuf1[j].validFlag = NO;
+									validItemNum --;
+								}
+							}
+						}
+					}
+				} // for(i=1; i<mapTimes; i++)
+
+				// copy the valid items
+				if(validItemNum>0)
 				{
-					matchItemNum1 = 0;
-					validItemNum = 0;
-					break;
-				}else if(matchItemNum2>0)
-				{
+					newMatchItemNum1 = 0;
 					for(j=0; j<matchItemNum1; j++)
 					{
 						if(matchResultArrayBuf1[j].validFlag==YES)
 						{
-							matchFlag = NO;
-
-							// get the startRow and endRow of Buf2
-							if(matchItemNum2>20)
+							if(memcpy(matchResultArray+newMatchItemNum1, matchResultArrayBuf1+j, sizeof(alignMatchItem_t))==NULL)
 							{
-								if(getRowRangeMatchArray(&startRow, &endRow, matchResultArrayBuf2, matchItemNum2, matchResultArrayBuf1[j].queryID)==FAILED)
-								{
-									printf("line=%d, In %s(), cannot get the array range, error!\n", __LINE__, __func__);
-									return FAILED;
-								}
+								printf("line=%d, In %s(), cannot copy memory, error!\n", __LINE__, __func__);
+								return FAILED;
 							}
-							else
-							{
-								startRow = 0;
-								endRow = matchItemNum2 - 1;
-							}
-
-							if(startRow>=0 && endRow>=0)
-							{
-								for(k=startRow; k<=endRow; k++)
-								{
-									if(matchResultArrayBuf1[j].queryID==matchResultArrayBuf2[k].queryID && matchResultArrayBuf1[j].queryPos+matchDistance==matchResultArrayBuf2[k].queryPos)
-									{
-										matchFlag = YES;
-										break;
-									}
-								}
-							}
-
-							if(matchFlag==NO)
-							{
-								matchResultArrayBuf1[j].validFlag = NO;
-								validItemNum --;
-							}
+							newMatchItemNum1 ++;
 						}
 					}
-				}
-			} // for(i=1; i<mapTimes; i++)
 
-			// copy the valid items
-			if(validItemNum>0)
-			{
-				newMatchItemNum1 = 0;
-				for(j=0; j<matchItemNum1; j++)
-				{
-					if(matchResultArrayBuf1[j].validFlag==YES)
+					if(newMatchItemNum1!=validItemNum)
 					{
-						if(memcpy(matchResultArray+newMatchItemNum1, matchResultArrayBuf1+j, sizeof(alignMatchItem_t))==NULL)
-						{
-							printf("line=%d, In %s(), cannot copy memory, error!\n", __LINE__, __func__);
-							return FAILED;
-						}
-						newMatchItemNum1 ++;
+						printf("newMatchItemNum1=%d, validItemNum=%d, error!\n", newMatchItemNum1, validItemNum);
 					}
-				}
-
-				if(newMatchItemNum1!=validItemNum)
-				{
-					printf("newMatchItemNum1=%d, validItemNum=%d, error!\n", newMatchItemNum1, validItemNum);
 				}
 			}
 		}
@@ -764,7 +1157,7 @@ short getMatchedQueryPosPerfect(alignMatchItem_t *matchResultArray, alignMatchIt
  */
 short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
 {
-	int32_t i, seqLen, entriesNumRead, tmpItemNum;
+	int32_t seqLen, entriesNumRead, tmpItemNum;
 	uint64_t *readSeqInt, *readSeqIntRev;
 
 	readSeqInt = readSet->readseqBlockArr[pRead->readseqBlockID-1].readseqArr + pRead->rowReadseqInBlock;
@@ -775,18 +1168,12 @@ short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *
 	*matchItemNum = 0;
 	if(seqLen>=queryIndex->kmerSize)
 	{
-		if(getMatchedQueryPosWithMismatch(matchResultArray, &tmpItemNum, readSeqInt, seqLen, queryIndex, queryArray, mismatchNumThreshold)==FAILED)
+		if(getMatchedQueryPosWithMismatch(matchResultArray, &tmpItemNum, readSeqInt, seqLen, ORIENTATION_PLUS, queryIndex, queryArray, mismatchNumThreshold)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot get the match query position, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
-
-		if(tmpItemNum>0)
-		{
-			for(i=0; i<tmpItemNum; i++)
-				matchResultArray[i].orientation = ORIENTATION_PLUS;
-			*matchItemNum = tmpItemNum;
-		}
+		*matchItemNum = tmpItemNum;
 
 		// the reverse complements
 		readSeqIntRev = (uint64_t*) calloc (entriesNumRead, sizeof(uint64_t));
@@ -804,18 +1191,12 @@ short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *
 		}
 
 		// align the read
-		if(getMatchedQueryPosWithMismatch(matchResultArray+(*matchItemNum), &tmpItemNum, readSeqIntRev, seqLen, queryIndex, queryArray, mismatchNumThreshold)==FAILED)
+		if(getMatchedQueryPosWithMismatch(matchResultArray+(*matchItemNum), &tmpItemNum, readSeqIntRev, seqLen, ORIENTATION_MINUS, queryIndex, queryArray, mismatchNumThreshold)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot get the match query position, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
-
-		if(tmpItemNum>0)
-		{
-			for(i=0; i<tmpItemNum; i++)
-				matchResultArray[i+(*matchItemNum)].orientation = ORIENTATION_MINUS;
-			*matchItemNum += tmpItemNum;
-		}
+		*matchItemNum += tmpItemNum;
 
 		free(readSeqIntRev);
 
@@ -838,14 +1219,14 @@ short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
+short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, int32_t orientation, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
 {
 	int32_t i, j, entriesNumRead, baseNumLastEntryRead, startBasePos, processedFlag;
 	uint64_t hashcode, kmerSeqInt[queryIndex->entriesPerKmer];
 	queryKmer_t *kmer;
 	char *querySeq, readSeq[MAX_READ_LEN_IN_BUF+1];
 	int32_t queryID, queryLen, queryPos, maxStartBasePos, remainBaseNum, misNum, startCmpRpos, startCmpQpos;
-	int32_t startAlignReadPos, endAlignReadPos, startAlignQueryPos, queryEndIgnoreLen;
+	int32_t startAlignReadPos, endAlignReadPos, startAlignQueryPos, queryEndIgnoreLen, shiftBaseNum;
 
 	entriesNumRead = ((seqLen - 1) >> 5) + 1;
 	baseNumLastEntryRead = ((seqLen - 1) % 32) + 1;
@@ -857,115 +1238,119 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 		// get the read base sequence
 		getReadBaseFromPosByInt(readSeq, readSeqInt, seqLen, 0, seqLen);
 
-		startBasePos = 0;
-		maxStartBasePos = seqLen - queryIndex->kmerSize;
-		while(startBasePos<=maxStartBasePos)
+		for(shiftBaseNum=0; shiftBaseNum<queryIndex->kmerSize; shiftBaseNum++)
 		{
-			// generate the kmer integer sequence
-			if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
+			startBasePos = shiftBaseNum;
+			maxStartBasePos = seqLen - queryIndex->kmerSize;
+			while(startBasePos<=maxStartBasePos)
 			{
-				printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-
-			// get the kmer
-			hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
-			kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
-
-			// record the match information
-			if(kmer)
-			{
-				for(i=0; i<kmer->arraysize; i++)
+				// generate the kmer integer sequence
+				if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
 				{
-					queryID = kmer->ppos[i].queryID;
-					queryPos = kmer->ppos[i].queryPos;
+					printf("line=%d, In %s(), cannot generate the kmer integer sequence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
 
-					querySeq = queryArray[queryID-1].querySeq;
-					queryLen = queryArray[queryID-1].queryLen;
+				// get the kmer
+				hashcode = kmerhashInt(kmerSeqInt, queryIndex->entriesPerKmer, queryIndex->lastEntryBaseNum, queryIndex->hashTableSize);
+				kmer = getQueryKmerByHash(hashcode, kmerSeqInt, queryIndex);
 
-					if(queryPos-startBasePos>=1)
+				// record the match information
+				if(kmer)
+				{
+					for(i=0; i<kmer->arraysize; i++)
 					{
-						startAlignReadPos = 1;
-						startAlignQueryPos = queryPos - startBasePos;
-					}else
-					{
-						startAlignReadPos = startBasePos + 2 - queryPos;
-						startAlignQueryPos = 1;
-					}
+						queryID = kmer->ppos[i].queryID;
+						queryPos = kmer->ppos[i].queryPos;
 
-					remainBaseNum = seqLen - startBasePos;
-					if(queryPos+remainBaseNum-1<=queryLen)
-						endAlignReadPos = seqLen;
-					else
-						endAlignReadPos = queryLen - (queryPos - startBasePos - 1);
+						querySeq = queryArray[queryID-1].querySeq;
+						queryLen = queryArray[queryID-1].queryLen;
 
-					if((endAlignReadPos>=seqLen-queryEndIgnoreLen+1) && (startAlignReadPos<=queryEndIgnoreLen))
-					{
-						// check whether it is processed already
-						if(isProcessedMatchItem(&processedFlag, queryID, startAlignQueryPos, matchResultArray, *matchItemNum)==FAILED)
+						if(queryPos-startBasePos>=1)
 						{
-							printf("line=%d, In %s(), cannot get the processed flag of alignment item, error!\n", __LINE__, __func__);
-							return FAILED;
+							startAlignReadPos = 1;
+							startAlignQueryPos = queryPos - startBasePos;
+						}else
+						{
+							startAlignReadPos = startBasePos + 2 - queryPos;
+							startAlignQueryPos = 1;
 						}
 
-						if(processedFlag==NO)
+						remainBaseNum = seqLen - startBasePos;
+						if(queryPos+remainBaseNum-1<=queryLen)
+							endAlignReadPos = seqLen;
+						else
+							endAlignReadPos = queryLen - (queryPos - startBasePos - 1);
+
+						if((endAlignReadPos>=seqLen-queryEndIgnoreLen+1) && (startAlignReadPos<=queryEndIgnoreLen))
 						{
-							// mismatch on right side
-							misNum = 0;
-							startCmpRpos = startBasePos + queryIndex->kmerSize;
-							startCmpQpos = queryPos + queryIndex->kmerSize - 1;
-							if(queryLen-startCmpQpos<seqLen-startCmpRpos)
-								remainBaseNum = queryLen - startCmpQpos;
-							else
-								remainBaseNum = seqLen - startCmpRpos;
-							for(j=0; j<remainBaseNum; j++)
+							// check whether it is processed already
+							if(isProcessedMatchItem(&processedFlag, queryID, startAlignQueryPos, matchResultArray, *matchItemNum)==FAILED)
 							{
-								if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+								printf("line=%d, In %s(), cannot get the processed flag of alignment item, error!\n", __LINE__, __func__);
+								return FAILED;
+							}
+
+							if(processedFlag==NO)
+							{
+								// mismatch on right side
+								misNum = 0;
+								startCmpRpos = startBasePos + queryIndex->kmerSize;
+								startCmpQpos = queryPos + queryIndex->kmerSize - 1;
+								if(queryLen-startCmpQpos<seqLen-startCmpRpos)
+									remainBaseNum = queryLen - startCmpQpos;
+								else
+									remainBaseNum = seqLen - startCmpRpos;
+								for(j=0; j<remainBaseNum; j++)
 								{
-									misNum ++;
-									if(misNum>mismatchNumThreshold)
-										break;
+									if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+									{
+										misNum ++;
+										if(misNum>mismatchNumThreshold)
+											break;
+									}
 								}
-							}
 
-							// mismatch on left side
-							startCmpRpos = startAlignReadPos - 1;
-							if(startAlignReadPos==1)
-							{
-								startCmpQpos = queryPos - startBasePos - 1;
-								remainBaseNum = startBasePos;
-							}else
-							{
-								startCmpQpos = 0;
-								remainBaseNum = startBasePos + 1 - startAlignReadPos;
-							}
-
-							for(j=0; j<remainBaseNum; j++)
-							{
-								if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+								// mismatch on left side
+								startCmpRpos = startAlignReadPos - 1;
+								if(startAlignReadPos==1)
 								{
-									misNum ++;
-									if(misNum>mismatchNumThreshold)
-										break;
+									startCmpQpos = queryPos - startBasePos - 1;
+									remainBaseNum = startBasePos;
+								}else
+								{
+									startCmpQpos = 0;
+									remainBaseNum = startBasePos + 1 - startAlignReadPos;
 								}
-							}
 
-							if(misNum<=mismatchNumThreshold)
-							{ // add the match information
-								matchResultArray[*matchItemNum].queryID = queryID;
-								matchResultArray[*matchItemNum].queryPos = startAlignQueryPos;
-								matchResultArray[*matchItemNum].mismatchNum = misNum;
-								matchResultArray[*matchItemNum].startReadPos = startAlignReadPos;
-								matchResultArray[*matchItemNum].alignSize = endAlignReadPos - startAlignReadPos + 1;
-								matchResultArray[*matchItemNum].validFlag = YES;
-								(*matchItemNum) ++;
+								for(j=0; j<remainBaseNum; j++)
+								{
+									if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+									{
+										misNum ++;
+										if(misNum>mismatchNumThreshold)
+											break;
+									}
+								}
+
+								if(misNum<=mismatchNumThreshold)
+								{ // add the match information
+									matchResultArray[*matchItemNum].queryID = queryID;
+									matchResultArray[*matchItemNum].queryPos = startAlignQueryPos;
+									matchResultArray[*matchItemNum].mismatchNum = misNum;
+									matchResultArray[*matchItemNum].startReadPos = startAlignReadPos;
+									matchResultArray[*matchItemNum].alignSize = endAlignReadPos - startAlignReadPos + 1;
+									matchResultArray[*matchItemNum].orientation = orientation;
+									matchResultArray[*matchItemNum].validFlag = YES;
+									(*matchItemNum) ++;
+								}
 							}
 						}
 					}
 				}
-			}
 
-			startBasePos += queryIndex->kmerSize;
+				startBasePos += queryIndex->kmerSize;
+			}
 		}
 	}
 
@@ -995,36 +1380,27 @@ short isProcessedMatchItem(int32_t *processedFlag, int32_t queryID, int32_t star
 }
 
 /**
- * Select the mated query position of paired reads.
+ * Get the mated pair count from paired-end reads alignment result.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t *matchItemNum1, int32_t *matchItemNum2, int32_t seqLen1, int32_t seqLen2, double insertSize, double standDev, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet)
+short getMatedNumAlignResult(int32_t *matedNum, alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t matchItemNum1, int32_t matchItemNum2, int32_t seqLen1, int32_t seqLen2, double insertSize, double standDev)
 {
-	struct pairMismatch
-	{
-		int32_t arrRow1, arrRow2, mismatchNum1, mismatchNum2, totalMismatchNum, fragSize, fragDif;
-	};
-
-	int32_t i, j, queryID1, queryPos1, queryID2, queryPos2, orient1, orient2, matedNum, matedRow1, matedRow2, pairRow;
+	int32_t i, j, queryID1, queryPos1, queryID2, queryPos2, orient1, orient2, matedRow1, matedRow2, pairRow;
 	double fragSize, fragDif, fragDifExist;
-	int32_t *zeroCovNumArray, zeroNum, itemRow, maxValue, maxRow, maxNum;
 
-	struct pairMismatch *pairMismatchArray;
-	int32_t minValue, minRow, minNum, itemNum, arrRow1, arrRow2, minID;
+	for(i=0; i<matchItemNum1; i++) matchResultArray1[i].pairRow = -1;
+	for(i=0; i<matchItemNum2; i++) matchResultArray2[i].pairRow = -1;
 
-	for(i=0; i<(*matchItemNum1); i++) matchResultArray1[i].pairRow = -1;
-	for(i=0; i<(*matchItemNum2); i++) matchResultArray2[i].pairRow = -1;
-
-	matedNum = 0;
+	*matedNum = 0;
 	matedRow1 = matedRow2 = -1;
-	for(i=0; i<(*matchItemNum1); i++)
+	for(i=0; i<matchItemNum1; i++)
 	{
 		queryID1 = matchResultArray1[i].queryID;
 		queryPos1 = matchResultArray1[i].queryPos;
 		orient1 = matchResultArray1[i].orientation;
 
-		for(j=0; j<(*matchItemNum2); j++)
+		for(j=0; j<matchItemNum2; j++)
 		{
 			queryID2 = matchResultArray2[j].queryID;
 			queryPos2 = matchResultArray2[j].queryPos;
@@ -1050,7 +1426,7 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
 						matchResultArray2[j].fragSize = fragSize;
 						matedRow2 = j;
 
-						matedNum ++;
+						(*matedNum) ++;
 					}
 				}else
 				{
@@ -1080,9 +1456,67 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
 		}
 	}
 
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute unique map flag for paired ends.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short computeUniqueMapFlags(int32_t *uniqueMapFlagArray, int32_t matedNum, alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t matchItemNum1, int32_t matchItemNum2)
+{
+	if(matedNum==1)
+	{
+		uniqueMapFlagArray[0] = YES;
+		uniqueMapFlagArray[1] = YES;
+	}else
+	{
+		if(matchItemNum1<=1)
+			uniqueMapFlagArray[0] = YES;
+		else
+			uniqueMapFlagArray[0] = NO;
+		if(matchItemNum2<=1)
+			uniqueMapFlagArray[1] = YES;
+		else
+			uniqueMapFlagArray[1] = NO;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Select the mated query position of paired reads.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t *matchItemNum1, int32_t *matchItemNum2, int32_t matedNum, int32_t seqLen1, int32_t seqLen2, double insertSize, double standDev, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet, threadPara_t *threadPara)
+{
+	struct pairMismatch
+	{
+		int32_t arrRow1, arrRow2, mismatchNum1, mismatchNum2, totalMismatchNum, fragSize, fragDif;
+	};
+
+	int32_t i, matedRow1, matedRow2, pairRow;
+	double fragDif;
+	int32_t *zeroCovNumArray, zeroNum, itemRow, maxValue, maxRow, maxNum;
+
+	struct pairMismatch *pairMismatchArray;
+	int32_t minValue, minRow, minNum, itemNum, arrRow1, arrRow2, minID;
 
 	if(matedNum==1)
 	{ // unique mated
+		// get matedRow
+		for(i=0; i<(*matchItemNum1); i++)
+		{
+			if(matchResultArray1[i].pairRow>=0)
+			{
+				matedRow1 = i;
+				matedRow2 = matchResultArray1[i].pairRow;
+				break;
+			}
+		}
+
 		if((*matchItemNum1)>1)
 		{
 			if(matedRow1>=1)
@@ -1173,7 +1607,7 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
 					if(pairMismatchArray[i].totalMismatchNum==minValue)
 					{
 						itemRow = pairMismatchArray[i].arrRow1;
-						if(getZeroCovBaseNumSingleRead(&zeroNum, matchResultArray1+itemRow, queryMatchInfoSet)==FAILED)
+						if(getZeroCovBaseNumSingleRead(&zeroNum, matchResultArray1+itemRow, queryMatchInfoSet, threadPara)==FAILED)
 						{
 							printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 							return FAILED;
@@ -1181,7 +1615,7 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
 						zeroCovNumArray[i] += zeroNum;
 
 						itemRow = pairMismatchArray[i].arrRow2;
-						if(getZeroCovBaseNumSingleRead(&zeroNum, matchResultArray2+itemRow, queryMatchInfoSet)==FAILED)
+						if(getZeroCovBaseNumSingleRead(&zeroNum, matchResultArray2+itemRow, queryMatchInfoSet, threadPara)==FAILED)
 						{
 							printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 							return FAILED;
@@ -1277,14 +1711,14 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
 	}else if(matedNum==0)
 	{
 		// select best alignment for single read
-		if(selectBestAlignInfoSingleRead(matchResultArray1, matchItemNum1, uniqueMapOpFlag, queryMatchInfoSet)==FAILED)
+		if(selectBestAlignInfoSingleRead(matchResultArray1, matchItemNum1, uniqueMapOpFlag, queryMatchInfoSet, threadPara)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot select the best alignment information for single read, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// select best alignment for single read
-		if(selectBestAlignInfoSingleRead(matchResultArray2, matchItemNum2, uniqueMapOpFlag, queryMatchInfoSet)==FAILED)
+		if(selectBestAlignInfoSingleRead(matchResultArray2, matchItemNum2, uniqueMapOpFlag, queryMatchInfoSet, threadPara)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot select the best alignment information for single read, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -1299,11 +1733,12 @@ short selectMatedMatchPosPE(alignMatchItem_t *matchResultArray1, alignMatchItem_
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *alignMatchItem, queryMatchInfo_t *queryMatchInfoSet)
+short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *alignMatchItem, queryMatchInfo_t *queryMatchInfoSet, threadPara_t *threadPara)
 {
 	int32_t i, queryID, queryPos, queryLen, alignSize, arrRow, arrCol, baseCovFlag;
 	uint64_t *covFlagArray;
 	query_t *queryItem;
+	ctrlLock_t *lockItem;
 
 	queryID = alignMatchItem->queryID;
 	queryPos = alignMatchItem->queryPos;
@@ -1314,6 +1749,27 @@ short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *ali
 
 	arrRow = (queryPos - 1) / 64;
 	arrCol = (queryPos - 1) % 64;
+
+	lockItem = threadPara->lockArray + queryID - 1;
+
+	// increase the reader count
+	pthread_mutex_lock(&lockItem->outerLock);
+	{
+		pthread_mutex_lock(&lockItem->readerLock);
+		{
+			pthread_mutex_lock(&lockItem->accessReaderCnt);
+			{
+				lockItem->readerCnt ++;
+				if(lockItem->readerCnt == 1)
+				{
+					pthread_mutex_lock(&lockItem->writeLock);
+				}
+			}
+			pthread_mutex_unlock(&lockItem->accessReaderCnt);
+		}
+		pthread_mutex_unlock(&lockItem->readerLock);
+	}
+	pthread_mutex_unlock(&lockItem->outerLock);
 
 	*zeroCovBaseNum = 0;
 	for(i=0; i<alignSize; i++)
@@ -1335,6 +1791,17 @@ short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *ali
 		}
 	}
 
+	// decrease the reader count
+	pthread_mutex_lock(&lockItem->accessReaderCnt);
+	{
+		lockItem->readerCnt --;
+		if(lockItem->readerCnt==0)
+		{
+			pthread_mutex_unlock(&lockItem->writeLock);
+		}
+	}
+	pthread_mutex_unlock(&lockItem->accessReaderCnt);
+
 	return SUCCESSFUL;
 }
 
@@ -1343,7 +1810,7 @@ short getZeroCovBaseNumSingleRead(int32_t *zeroCovBaseNum, alignMatchItem_t *ali
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short selectBestAlignInfoSingleRead(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet)
+short selectBestAlignInfoSingleRead(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, int32_t uniqueMapOpFlag, queryMatchInfo_t *queryMatchInfoSet, threadPara_t *threadPara)
 {
 	int32_t i, minValue, minRow, minNum, itemNum, minID;
 	int32_t *zeroCovNumArray;
@@ -1383,7 +1850,7 @@ short selectBestAlignInfoSingleRead(alignMatchItem_t *matchResultArray, int32_t 
 				{
 					if(matchResultArray[i].mismatchNum==minValue)
 					{
-						if(getZeroCovBaseNumSingleRead(zeroCovNumArray+i, matchResultArray+i, queryMatchInfoSet)==FAILED)
+						if(getZeroCovBaseNumSingleRead(zeroCovNumArray+i, matchResultArray+i, queryMatchInfoSet, threadPara)==FAILED)
 						{
 							printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 							return FAILED;
@@ -1465,15 +1932,243 @@ short selectBestAlignInfoSingleRead(alignMatchItem_t *matchResultArray, int32_t 
 }
 
 /**
+ * Get more align items from unmated paired ends.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getMoreAlignItemsFromUnmatedPE(int32_t *matedNum, int64_t readID1, int64_t readID2, alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t *matchItemNum1, int32_t *matchItemNum2, int32_t mismatchNumThreshold, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+{
+	read_t *pRead1, *pRead2;
+
+	// get the two ends
+	if(getReadByReadID(&pRead1, readID1, readSet)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot get the read %ld, error!\n", __LINE__, __func__, readID1);
+		return FAILED;
+	}
+	if(getReadByReadID(&pRead2, readID2, readSet)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot get the read %ld, error!\n", __LINE__, __func__, readID2);
+		return FAILED;
+	}
+
+	if(pRead1->validFlag==YES && pRead2->validFlag==YES)
+	{
+		// get aligned reads based on the second end
+		if(getAlignItemsFromUnmatedEnd(matedNum, pRead1, matchResultArray1, matchItemNum1, pRead2, matchResultArray2, *matchItemNum2, mismatchNumThreshold, queryMatchInfoSet, readSet)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot get align items from unmated end, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		// get aligned reads based on second ends
+		if(getAlignItemsFromUnmatedEnd(matedNum, pRead2, matchResultArray2, matchItemNum2, pRead1, matchResultArray1, *matchItemNum1, mismatchNumThreshold, queryMatchInfoSet, readSet)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot get align items from unmated end, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Get more align items from unmated end.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getAlignItemsFromUnmatedEnd(int32_t *matedNum, read_t *pRead, alignMatchItem_t *matchResultArray, int32_t *matchItemNum, read_t *pReadBased, alignMatchItem_t *matchResultArrayBased, int32_t matchItemNumBased, int32_t mismatchNumThreshold, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+{
+	int32_t i;
+
+	for(i=0; i<matchItemNumBased; i++)
+	{
+		if(matchResultArrayBased[i].pairRow==-1)
+		{
+			if(getAlignItemsFromSingleUnmatedPos(matedNum, pRead, matchResultArray, matchItemNum, pReadBased, matchResultArrayBased+i, i, mismatchNumThreshold, queryMatchInfoSet, readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot get align items from unmated position, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Get align items from unmated position.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getAlignItemsFromSingleUnmatedPos(int32_t *matedNum, read_t *pRead, alignMatchItem_t *matchResultArray, int32_t *matchItemNum, read_t *pReadBased, alignMatchItem_t *matchItemBased, int32_t itemRowBased, int32_t mismatchNumThreshold, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+{
+	int32_t startQueryPos, endQueryPos, queryIDBased, queryPosBased, orientBased, validFlag;
+	query_t *queryItem;
+	uint64_t *readSeqInt;
+	int32_t softClipEnd, orient, clipNum, gapNumQuery, gapNumRead, misNum, startAlignQueryPos, endAlignQueryPos, startAlignReadPos, endAlignReadPos;
+	double insertSize, standDev, fragSize;
+
+	char *queryAlignSeq, *readAlignSeq;
+	int32_t queryAlignSeqLen, readAlignSeqLen, maxSeqLen;
+	char *alignResultArray[3];
+	int32_t overlapLen, mismatchNum, queryLeftShiftLen, queryRightShiftLen, readLeftShiftLen, readRightShiftLen;
+
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
+
+	queryIDBased = matchItemBased->queryID;
+	queryPosBased = matchItemBased->queryPos;
+	orientBased = matchItemBased->orientation;
+
+	queryItem = queryMatchInfoSet->queryArray + queryIDBased - 1;
+	readSeqInt = readSet->readseqBlockArr[pRead->readseqBlockID-1].readseqArr + pRead->rowReadseqInBlock;
+
+	validFlag = NO;
+	if(orientBased==ORIENTATION_PLUS)
+	{
+		startQueryPos = queryPosBased;
+		endQueryPos = startQueryPos + insertSize + standDev * 6;
+		if(endQueryPos>queryItem->queryLen)
+		{
+			endQueryPos = queryItem->queryLen;
+			validFlag = YES;
+		}
+		queryAlignSeqLen = endQueryPos - startQueryPos + 1;
+	}else
+	{
+		endQueryPos = queryPosBased + pReadBased->seqlen - matchItemBased->startReadPos;
+		startQueryPos = endQueryPos - insertSize - standDev * 6;
+		if(startQueryPos<1)
+		{
+			startQueryPos = 1;
+			validFlag = YES;
+		}
+		queryAlignSeqLen = endQueryPos - startQueryPos + 1;
+	}
+	readAlignSeqLen = pRead->seqlen;
+
+	if(validFlag==NO)
+		return SUCCESSFUL;
+
+	if(queryAlignSeqLen<readAlignSeqLen)
+		maxSeqLen = 2 * readAlignSeqLen;
+	else
+		maxSeqLen = 2 * queryAlignSeqLen;
+
+	// initialize the alignment buffer
+	if(initAlignBuf(alignResultArray, &queryAlignSeq, &readAlignSeq, maxSeqLen)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize the alignment buffers, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	// get the two sequences
+	strncpy(queryAlignSeq, queryItem->querySeq+startQueryPos-1, queryAlignSeqLen);
+	queryAlignSeq[queryAlignSeqLen] = '\0';
+
+	if(orientBased==ORIENTATION_MINUS)
+	{
+		getReadBaseFromPosByInt(readAlignSeq, readSeqInt, pRead->seqlen, 0, pRead->seqlen);
+		orient = ORIENTATION_PLUS;
+	}else
+	{
+		getReverseReadBaseFromPosByInt(readAlignSeq, readSeqInt, pRead->seqlen, 0, pRead->seqlen);
+		orient = ORIENTATION_MINUS;
+	}
+
+	// generate alignment
+	if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &readLeftShiftLen, &queryRightShiftLen, &readRightShiftLen, queryAlignSeq, readAlignSeq, queryAlignSeqLen, readAlignSeqLen, NO)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot compute the alignment, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	if(mismatchNum<=mismatchNumThreshold && overlapLen>=0.6*pRead->seqlen)
+	{
+		// compute alignment gap number
+		if(computeAlignGapNum(&gapNumQuery, &gapNumRead, &misNum, alignResultArray, overlapLen)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot compute the alignment gap count, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		if(gapNumQuery==0 && gapNumRead==0)
+		{
+			if(readLeftShiftLen>0 && startQueryPos-(readLeftShiftLen-queryLeftShiftLen)<1)
+			{ // clip at 5' end
+				softClipEnd = 1;
+				clipNum = readLeftShiftLen - queryLeftShiftLen;
+				mismatchNum += (readLeftShiftLen - clipNum) + readRightShiftLen;
+				startAlignReadPos = clipNum + 1;
+				endAlignReadPos = pRead->seqlen;
+				startAlignQueryPos = 1;
+				endAlignQueryPos = startAlignQueryPos + pRead->seqlen - clipNum - 1;
+			}else if(readRightShiftLen>0 && endQueryPos+(readRightShiftLen-queryRightShiftLen)>queryItem->queryLen)
+			{ // clip at 3' end
+				softClipEnd = 2;
+				clipNum = readRightShiftLen - queryRightShiftLen;
+				mismatchNum += readLeftShiftLen + (readRightShiftLen - clipNum);
+				startAlignReadPos = 1;
+				endAlignReadPos = pRead->seqlen - clipNum;
+				startAlignQueryPos = endQueryPos - queryRightShiftLen - (pRead->seqlen - readRightShiftLen) + 1;
+				endAlignQueryPos = endQueryPos;
+			}else
+			{ // no clip
+				softClipEnd = -1;
+				clipNum = 0;
+				mismatchNum += readLeftShiftLen + readRightShiftLen;
+				startAlignReadPos = 1;
+				endAlignReadPos = pRead->seqlen;
+				startAlignQueryPos = startQueryPos + (queryLeftShiftLen - readLeftShiftLen);
+				endAlignQueryPos = startAlignQueryPos + pRead->seqlen - 1;
+			}
+
+			if(mismatchNum<=mismatchNumThreshold)
+			{
+				matchResultArray[*matchItemNum].queryID = queryIDBased;
+				matchResultArray[*matchItemNum].queryPos = startAlignQueryPos;
+				matchResultArray[*matchItemNum].mismatchNum = mismatchNum;
+				matchResultArray[*matchItemNum].startReadPos = startAlignReadPos;
+				matchResultArray[*matchItemNum].alignSize = endAlignReadPos - startAlignReadPos + 1;
+				matchResultArray[*matchItemNum].orientation = orient;
+				matchResultArray[*matchItemNum].validFlag = YES;
+
+				matchResultArray[*matchItemNum].pairRow = itemRowBased;
+				matchItemBased->pairRow = *matchItemNum;
+				matchItemBased->validFlag = YES;
+
+				if(orient==ORIENTATION_PLUS)
+					fragSize = queryPosBased + pReadBased->seqlen - startAlignQueryPos;
+				else
+					fragSize = startAlignQueryPos + pReadBased->seqlen - queryPosBased;
+
+				matchResultArray[*matchItemNum].fragSize = fragSize;
+				matchItemBased->fragSize = fragSize;
+
+				(*matchItemNum) ++;
+				(*matedNum) ++;
+			}
+		}
+	}
+
+	// free the buffer
+	freeAlignBuf(alignResultArray, &queryAlignSeq, &readAlignSeq);
+
+	return SUCCESSFUL;
+}
+
+/**
  * Update the query coverage flag.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *alignMatchItem)
+short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *alignMatchItem, threadPara_t *threadPara)
 {
 	int32_t i, arrRow, arrCol, queryPos, queryLen, alignSize;
 	uint64_t *covFlagArray, flagInt;
 	query_t *queryItem;
+	ctrlLock_t *lockItem;
 
 	queryItem = queryMatchInfoSet->queryArray + (alignMatchItem->queryID - 1);
 	queryLen = queryItem->queryLen;
@@ -1484,23 +2179,52 @@ short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *
 	arrRow = (queryPos - 1) / 64;
 	arrCol = (queryPos - 1) % 64;
 
-	for(i=0; i<alignSize; i++)
-	{
-		flagInt = 1LLU << (63 - arrCol);
-		covFlagArray[arrRow] |= flagInt;
-		arrCol ++;
-		if(arrCol==64)
-		{
-			arrCol = 0;
-			arrRow ++;
-		}
+	lockItem = threadPara->lockArray + alignMatchItem->queryID - 1;
 
-		if(queryPos+i>queryLen)
+	// increase the writer count
+	pthread_mutex_lock(&lockItem->accessWriterCnt);
+	{
+		lockItem->writerCnt ++;
+		if(lockItem->writerCnt==1)
 		{
-			printf("line=%d, In %s(), basePos=%d, queryLen=%d, error!\n", __LINE__, __func__, queryPos+i, queryLen);
-			return FAILED;
+			pthread_mutex_lock(&lockItem->readerLock);
 		}
 	}
+	pthread_mutex_unlock(&lockItem->accessWriterCnt);
+
+	// write the data
+	pthread_mutex_lock(&lockItem->writeLock);
+	{
+		for(i=0; i<alignSize; i++)
+		{
+			flagInt = 1LLU << (63 - arrCol);
+			covFlagArray[arrRow] |= flagInt;
+			arrCol ++;
+			if(arrCol==64)
+			{
+				arrCol = 0;
+				arrRow ++;
+			}
+
+			if(queryPos+i>queryLen)
+			{
+				printf("line=%d, In %s(), basePos=%d, queryLen=%d, error!\n", __LINE__, __func__, queryPos+i, queryLen);
+				return FAILED;
+			}
+		}
+	}
+	pthread_mutex_unlock(&lockItem->writeLock);
+
+	// decrease the writer count
+	pthread_mutex_lock(&lockItem->accessWriterCnt);
+	{
+		lockItem->writerCnt --;
+		if(lockItem->writerCnt==0)
+		{
+			pthread_mutex_unlock(&lockItem->readerLock);
+		}
+	}
+	pthread_mutex_unlock(&lockItem->accessWriterCnt);
 
 	return SUCCESSFUL;
 }
@@ -1611,63 +2335,182 @@ short getRowRangeMatchArray(int32_t *startRow, int32_t *endRow, alignMatchItem_t
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short fillReadMatchInfoQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+short fillReadMatchInfoQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray)
+{
+	int32_t i;
+
+	// initialize the memory for query reads
+	if(initQueryReadSets(queryMatchInfoSet, readSetArray)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot initialize the memory for query reads, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	for(i=0; i<readSetArray->readSetNum; i++)
+	{
+		if(fillQueryReadSet(queryMatchInfoSet, readSetArray->readSetArray+i)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot fill query reads, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+	}
+
+	// sort the query reads
+	if(sortQueryReadSets(queryMatchInfoSet)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot sort query reads, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Initialize the memory for query reads.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short initQueryReadSets(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray)
+{
+	int32_t i, j, k, queryReadSetNum;
+	queryReadSet_t *queryReadSetArray;
+	readSet_t *readSet;
+	readBlock_t *readBlock;
+	readMatchInfoBlock_t *readMatchInfoBlock;
+	readMatchInfo_t *pReadMatchInfo;
+	query_t *queryItem;
+
+	queryReadSetNum = readSetArray->readSetNum;
+
+	// compute the read count for each query
+	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
+	{
+		queryReadSetArray = (queryReadSet_t*) calloc (queryReadSetNum, sizeof(queryReadSet_t));
+		if(queryReadSetArray==NULL)
+		{
+			printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		for(j=0; j<queryReadSetNum; j++)
+		{
+			queryReadSetArray[j].queryReadArray = NULL;
+			queryReadSetArray[j].queryReadNum = 0;
+			queryReadSetArray[j].setID = j + 1;
+		}
+		queryMatchInfoSet->queryArray[i].queryReadSetArray = queryReadSetArray;
+		queryMatchInfoSet->queryArray[i].queryReadSetNum = queryReadSetNum;
+	}
+
+	for(i=0; i<queryReadSetNum; i++)
+	{
+		readSet = readSetArray->readSetArray + i;
+		for(j=0; j<readSet->blocksNumRead; j++)
+		{
+			readBlock = readSet->readBlockArr + j;
+			readMatchInfoBlock = readSet->readMatchInfoBlockArr + j;
+			for(k=0; k<readBlock->itemNum; k++)
+			{
+				pReadMatchInfo = readMatchInfoBlock->readMatchInfoArr + k;
+				if(pReadMatchInfo->queryID>0)
+				{
+					queryItem = queryMatchInfoSet->queryArray + pReadMatchInfo->queryID - 1;
+					queryItem->queryReadSetArray[i].queryReadNum ++;
+				}
+			}
+		}
+	}
+
+	// allocate memory
+	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
+	{
+		queryItem = queryMatchInfoSet->queryArray + i;
+		for(j=0; j<queryItem->queryReadSetNum; j++)
+		{
+			if(queryItem->queryReadSetArray[j].queryReadNum>0)
+			{
+				queryItem->queryReadSetArray[j].queryReadArray = (queryRead_t *) calloc (queryItem->queryReadSetArray[j].queryReadNum, sizeof(queryRead_t));
+				if(queryItem->queryReadSetArray[j].queryReadArray==NULL)
+				{
+					printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+				queryItem->queryReadSetArray[j].queryReadNum = 0;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Fill the query reads set.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short fillQueryReadSet(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
+{
+	int32_t i, j, k;
+	readBlock_t *readBlock;
+	readMatchInfoBlock_t *readMatchInfoBlock;
+	readMatchInfo_t *pReadMatchInfo;
+	queryReadSet_t *queryReadSet;
+	int32_t queryReadSetID;
+
+	queryReadSetID = readSet->setID;
+
+	// fill the match information
+	for(j=0; j<readSet->blocksNumRead; j++)
+	{
+		readBlock = readSet->readBlockArr + j;
+		readMatchInfoBlock = readSet->readMatchInfoBlockArr + j;
+		for(k=0; k<readBlock->itemNum; k++)
+		{
+			pReadMatchInfo = readMatchInfoBlock->readMatchInfoArr + k;
+			if(pReadMatchInfo->queryID>0)
+			{
+				queryReadSet = queryMatchInfoSet->queryArray[pReadMatchInfo->queryID-1].queryReadSetArray + queryReadSetID - 1;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].readID = pReadMatchInfo->readID;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].queryPos = pReadMatchInfo->queryPos;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].seqlen = pReadMatchInfo->seqlen;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].orientation = pReadMatchInfo->readOrientation;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].startReadPos = pReadMatchInfo->startReadPos;
+				queryReadSet->queryReadArray[queryReadSet->queryReadNum].alignSize = pReadMatchInfo->alignSize;
+				queryReadSet->queryReadNum ++;
+			}
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Sort the query reads sets.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short sortQueryReadSets(queryMatchInfo_t *queryMatchInfoSet)
 {
 	int32_t i, j, maxReadsNum;
 	readBlock_t *readBlock;
 	readMatchInfoBlock_t *readMatchInfoBlock;
 	readMatchInfo_t *pReadMatchInfo;
 	query_t *queryItem;
+	queryReadSet_t *queryReadSetArray;
 	queryRead_t *queryReadArrayBuf;
-	int32_t queryReadNumTmp;
-
-
-	// allocate memory
-	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
-	{
-		queryItem = queryMatchInfoSet->queryArray + i;
-		if(queryItem->queryReadNum>0)
-		{
-			queryItem->queryReadArray = (queryRead_t *) calloc (queryItem->queryReadNum, sizeof(queryRead_t));
-			if(queryItem->queryReadArray==NULL)
-			{
-				printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-		}
-		queryItem->queryReadNum = 0;
-	}
-
-	// fill the match information
-	queryReadNumTmp = 0;
-	for(i=0; i<readSet->blocksNumRead; i++)
-	{
-		readBlock = readSet->readBlockArr + i;
-		readMatchInfoBlock = readSet->readMatchInfoBlockArr + i;
-		for(j=0; j<readBlock->itemNum; j++)
-		{
-			pReadMatchInfo = readMatchInfoBlock->readMatchInfoArr + j;
-			if(pReadMatchInfo->queryID>0)
-			{
-				queryItem = queryMatchInfoSet->queryArray + pReadMatchInfo->queryID - 1;
-				queryItem->queryReadArray[queryItem->queryReadNum].readID = pReadMatchInfo->readID;
-				queryItem->queryReadArray[queryItem->queryReadNum].queryPos = pReadMatchInfo->queryPos;
-				queryItem->queryReadArray[queryItem->queryReadNum].seqlen = pReadMatchInfo->seqlen;
-				queryItem->queryReadArray[queryItem->queryReadNum].orientation = pReadMatchInfo->readOrientation;
-				queryItem->queryReadArray[queryItem->queryReadNum].startReadPos = pReadMatchInfo->startReadPos;
-				queryItem->queryReadArray[queryItem->queryReadNum].alignSize = pReadMatchInfo->alignSize;
-				queryItem->queryReadNum ++;
-			}
-		}
-	}
+	int32_t queryReadSetNum;
 
 	// get the maximal array size and allocate the buffer memory
 	maxReadsNum = 0;
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		queryItem = queryMatchInfoSet->queryArray + i;
-		if(maxReadsNum<queryItem->queryReadNum)
-			maxReadsNum = queryItem->queryReadNum;
+		queryReadSetArray = queryItem->queryReadSetArray;
+		queryReadSetNum = queryItem->queryReadSetNum;
+		for(j=0; j<queryReadSetNum; j++)
+		{
+			if(maxReadsNum<queryReadSetArray[j].queryReadNum)
+				maxReadsNum = queryReadSetArray[j].queryReadNum;
+		}
 	}
 	if(maxReadsNum<=0)
 	{
@@ -1686,12 +2529,17 @@ short fillReadMatchInfoQueries(queryMatchInfo_t *queryMatchInfoSet, readSet_t *r
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		queryItem = queryMatchInfoSet->queryArray + i;
-		if(queryItem->queryReadNum>0)
+		queryReadSetArray = queryItem->queryReadSetArray;
+		queryReadSetNum = queryItem->queryReadSetNum;
+		for(j=0; j<queryReadSetNum; j++)
 		{
-			if(radixSortQueryReadArray(queryItem->queryReadArray, queryReadArrayBuf, queryItem->queryReadNum)==FAILED)
+			if(queryReadSetArray[j].queryReadNum>0)
 			{
-				printf("line=%d, In %s(), cannot sort the query read array, error!\n", __LINE__, __func__);
-				return FAILED;
+				if(radixSortQueryReadArray(queryReadSetArray[j].queryReadArray, queryReadArrayBuf, queryReadSetArray[j].queryReadNum)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot sort the query read array, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
 			}
 		}
 	}
@@ -1965,90 +2813,132 @@ short radixSortMatchResults(alignMatchItem_t *matchResultArray, alignMatchItem_t
  */
 short outputQueryReadArray(char *outfile, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet)
 {
-	int32_t i, j, queryID, queryLen, queryPos, queryPos_paired, fragSize, fragSizeDif, itemNum, matedFlag;
+	int32_t i, j, queryID, queryLen, queryPos, queryPos_paired, fragSize, itemNum, matedFlag, uniqueMapFlag;
 	int64_t readID, readID_paired;
-	char orientation;
+	double insertSize, standDev, fragSizeDif;
+	char orientation, outFileName[256];
 	query_t *queryItem;
 	queryRead_t *queryReadArray;
+	int32_t queryReadSetNum;
 	FILE *fpOut;
 
 	readMatchInfoBlock_t *readMatchInfoBlockArr;
 	readMatchInfo_t *pReadMatchInfo;
 	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
 
+	queryReadSetNum = 1;
 
-	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
-	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
-
-
-	fpOut = fopen(outfile, "w");
-	if(fpOut==NULL)
+	for(i=0; i<queryReadSetNum; i++)
 	{
-		printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, outfile);
-		return FAILED;
-	}
+		strcpy(outFileName, outfile);
+		sprintf(outFileName+strlen(outFileName), "%d", i);
 
-	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
-	{
-		queryItem = queryMatchInfoSet->queryArray + i;
-		queryID = queryItem->queryID;
-		queryLen = queryItem->queryLen;
-		if(queryItem->queryReadNum>0)
+		fpOut = fopen(outFileName, "w");
+		if(fpOut==NULL)
 		{
-			queryReadArray = queryItem->queryReadArray;
-			itemNum = queryItem->queryReadNum;
-			fprintf(fpOut, ">%s\t%d\t0\t%d\n", queryItem->queryTitle, queryLen, itemNum);
-			for(j=0; j<itemNum; j++)
+			printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, outFileName);
+			return FAILED;
+		}
+
+		readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
+		maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
+
+		insertSize = readSet->insertSize;
+		standDev = readSet->standDev;
+
+		for(j=0; j<queryMatchInfoSet->itemNumQueryArray; j++)
+		{
+			queryItem = queryMatchInfoSet->queryArray + j;
+			queryID = queryItem->queryID;
+			queryLen = queryItem->queryLen;
+
+			if(queryItem->queryReadSetArray[i].queryReadNum>0)
 			{
-				readID = queryReadArray[j].readID;
-				queryPos = queryReadArray[j].queryPos;
-
-				if(queryReadArray[j].orientation==ORIENTATION_PLUS)
-					orientation = '+';
-				else
-					orientation = '-';
-
-				if(readID%2==1)
-					readID_paired = readID + 1;
-				else
-					readID_paired = readID - 1;
-
-				readMatchInfoBlockID = (readID_paired - 1) / maxItemNumPerReadMatchInfoBlock;
-				rowNumInReadMatchInfoBlock = (readID_paired - 1) % maxItemNumPerReadMatchInfoBlock;
-				pReadMatchInfo = readMatchInfoBlockArr[readMatchInfoBlockID].readMatchInfoArr + rowNumInReadMatchInfoBlock;
-
-				if(pReadMatchInfo->queryID==queryID && queryReadArray[j].orientation!=pReadMatchInfo->readOrientation)
+				queryReadArray = queryItem->queryReadSetArray[i].queryReadArray;
+				itemNum = queryItem->queryReadSetArray[i].queryReadNum;
+				fprintf(fpOut, ">%s\t%d\t0\t%d\n", queryItem->queryTitle, queryLen, itemNum);
+				for(j=0; j<itemNum; j++)
 				{
-					queryPos_paired = pReadMatchInfo->queryPos;
+					readID = queryReadArray[j].readID;
+					queryPos = queryReadArray[j].queryPos;
 
 					if(queryReadArray[j].orientation==ORIENTATION_PLUS)
-						fragSize = queryPos_paired + pReadMatchInfo->seqlen - queryPos;
+						orientation = '+';
 					else
-						fragSize = queryPos + queryReadArray[j].seqlen - queryPos_paired;
+						orientation = '-';
 
-					fragSizeDif = fragSize - 370;
-					if(fragSizeDif>-300 && fragSizeDif<300)
-						matedFlag = YES;
+					// get uniqueMap flag
+					if(getUniqueMapFlag(&uniqueMapFlag, readID, readSet)==FAILED)
+					{
+						printf("line=%d, In %s(), cannot get unique map flag, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+
+					if(readID%2==1)
+						readID_paired = readID + 1;
 					else
+						readID_paired = readID - 1;
+
+					readMatchInfoBlockID = (readID_paired - 1) / maxItemNumPerReadMatchInfoBlock;
+					rowNumInReadMatchInfoBlock = (readID_paired - 1) % maxItemNumPerReadMatchInfoBlock;
+					pReadMatchInfo = readMatchInfoBlockArr[readMatchInfoBlockID].readMatchInfoArr + rowNumInReadMatchInfoBlock;
+
+					if(pReadMatchInfo->queryID==queryID && queryReadArray[j].orientation!=pReadMatchInfo->readOrientation)
+					{
+						queryPos_paired = pReadMatchInfo->queryPos;
+
+						if(queryReadArray[j].orientation==ORIENTATION_PLUS)
+							fragSize = queryPos_paired + pReadMatchInfo->seqlen - queryPos;
+						else
+							fragSize = queryPos + queryReadArray[j].seqlen - queryPos_paired;
+
+						fragSizeDif = fragSize - insertSize;
+						if(fragSizeDif>-5*standDev && fragSizeDif<5*standDev)
+							matedFlag = YES;
+						else
+							matedFlag = NO;
+
+						if(queryReadArray[j].orientation==ORIENTATION_MINUS)
+							fragSize = - fragSize;
+					}else
+					{
 						matedFlag = NO;
+					}
 
-					if(queryReadArray[j].orientation==ORIENTATION_MINUS)
-						fragSize = - fragSize;
-				}else
-				{
-					matedFlag = NO;
+					if(matedFlag==YES)
+						fprintf(fpOut, "%d\t%ld\t%c\t%d\t%d\t%d\t%d\t%d\n", queryReadArray[j].queryPos, (int64_t)queryReadArray[j].readID, orientation, (int32_t)queryReadArray[j].startReadPos, (int32_t)queryReadArray[j].alignSize, uniqueMapFlag, (int32_t)queryReadArray[j].seqlen, fragSize);
+					else
+						fprintf(fpOut, "%d\t%ld\t%c\t%d\t%d\t%d\t%d\n", queryReadArray[j].queryPos, (int64_t)queryReadArray[j].readID, orientation, (int32_t)queryReadArray[j].startReadPos, (int32_t)queryReadArray[j].alignSize, uniqueMapFlag, (int32_t)queryReadArray[j].seqlen);
 				}
-
-				if(matedFlag==YES)
-					fprintf(fpOut, "%d\t%ld\t%c\t%d\t%d\n", queryReadArray[j].queryPos, queryReadArray[j].readID, orientation, queryReadArray[j].seqlen, fragSize);
-				else
-					fprintf(fpOut, "%d\t%ld\t%c\t%d\n", queryReadArray[j].queryPos, queryReadArray[j].readID, orientation, queryReadArray[j].seqlen);
 			}
 		}
-	}
 
-	fclose(fpOut);
+		fclose(fpOut);
+	}
 
 	return SUCCESSFUL;
 }
 
+/**
+ * Get the unique map flag of a read.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getUniqueMapFlag(int32_t *uniqueMapFlag, int64_t readID, readSet_t *readSet)
+{
+	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
+	read_t *pRead;
+
+	maxItemNumPerReadBlock = readSet->maxItemNumPerReadBlock;
+
+	readBlockID = (readID - 1) / maxItemNumPerReadBlock;
+	rowNumInReadBlock = (readID - 1) % maxItemNumPerReadBlock;
+	pRead = readSet->readBlockArr[readBlockID].readArr + rowNumInReadBlock;
+
+	if(pRead->validFlag==YES && pRead->successMapFlag==YES)
+		*uniqueMapFlag = pRead->uniqueMapFlag;
+	else
+		*uniqueMapFlag = -1;
+
+	return SUCCESSFUL;
+}

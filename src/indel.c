@@ -14,7 +14,7 @@
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineQueryIndel(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double insertSize, double standDev)
+short determineQueryIndel(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet)
 {
 	misInfo_t *misInfo;
 	queryIndel_t *queryIndel;
@@ -40,7 +40,7 @@ short determineQueryIndel(query_t *queryItem, baseCov_t *baseCovArray, subject_t
 			if(misInfo->misType==QUERY_INDEL_KIND)
 			{
 				queryIndel = misInfo->queryIndel;
-				if(confirmQueryIndelKind(queryIndel, queryItem, misInfo->innerFlag, baseCovArray, subjectArray, readSet, insertSize, standDev)==FAILED)
+				if(confirmQueryIndelKind(queryIndel, queryItem, misInfo->innerFlag, baseCovArray, subjectArray, readSet)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot confirm query insert information, error!\n", __LINE__, __func__);
 					return FAILED;
@@ -60,7 +60,7 @@ short determineQueryIndel(query_t *queryItem, baseCov_t *baseCovArray, subject_t
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_t innerFlag, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double insertSize, double standDev)
+short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_t innerFlag, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet)
 {
 	int32_t globalSegNum, leftMargin, rightMargin;
 	globalValidSeg_t *globalSegArray, *leftSeg, *rightSeg;
@@ -68,7 +68,10 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 	int32_t startQueryPosRight, endQueryPosRight, startQueryPosFragRight, endQueryPosFragRight;
 	int32_t startRegPos, endRegPos, subRegSize, ratioRegionNum, leftPos, rightPos;
 	ratioRegion_t *ratioRegionArray;
+	double insertSize, standDev;
 
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
 	globalSegArray = queryItem->globalValidSegArray;
 	globalSegNum = queryItem->globalValidSegNum;
 
@@ -120,7 +123,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 
 		// compute the fragment size of paired-end reads in the left region
-		if(computeFragSizeLeftRegQueryIndel(queryIndel, startQueryPosFragLeft, endQueryPosFragLeft, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(computeFragSizeLeftRegQueryIndel(queryIndel, startQueryPosFragLeft, endQueryPosFragLeft, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -170,7 +173,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 
 		// compute the fragment size of paired-end reads in the right region
-		if(computeFragSizeRightRegQueryIndel(queryIndel, startQueryPosFragRight, endQueryPosFragRight, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(computeFragSizeRightRegQueryIndel(queryIndel, startQueryPosFragRight, endQueryPosFragRight, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -213,7 +216,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 
 		// compute the fragment size of paired-end reads between the two regions
-		if(computeFragSizeBothRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(computeFragSizeBothRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -242,7 +245,7 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
 		}
 
 		// compute disagreements, S/P, S-/SL, S+/SR, insert size for each sub-region
-		if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, insertSize, standDev)==FAILED)
+		if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -282,12 +285,12 @@ short confirmQueryIndelKind(queryIndel_t *queryIndel, query_t *queryItem, int32_
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeFragSizeLeftRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosLeft, int32_t endQueryPosLeft, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short computeFragSizeLeftRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosLeft, int32_t endQueryPosLeft, query_t *queryItem, readSet_t *readSet)
 {
 	int64_t i, pairNumValid, queryID, queryID_paired, readID, readID_paired, queryPos, queryPos_paired, orient, orient_paired, seqLen, seqLen_paired, midPos;
-	int64_t discorNum, pairNumTotal;
-	queryRead_t *queryRead;
-	double fragSize, difFragSize, fragSizeSum;
+	int32_t discorNum, pairNumTotal, setID, queryReadNum;
+	queryRead_t *queryRead, *queryReadArray;
+	double insertSize, standDev, fragSize, difFragSize, fragSizeSum;
 	char orientCh1, orientCh2;
 
 	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
@@ -297,13 +300,20 @@ short computeFragSizeLeftRegQueryIndel(queryIndel_t *queryIndel, int32_t startQu
 	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
 	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
 
+	setID = readSet->setID;
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
+
 	discorNum = pairNumTotal = 0;
 	fragSizeSum = 0;
 	pairNumValid = 0;
 	queryID = queryItem->queryID;
-	for(i=0; i<queryItem->queryReadNum; i++)
+
+	queryReadArray = queryItem->queryReadSetArray[setID-1].queryReadArray;
+	queryReadNum = queryItem->queryReadSetArray[setID-1].queryReadNum;
+	for(i=0; i<queryReadNum; i++)
 	{
-		queryRead = queryItem->queryReadArray + i;
+		queryRead = queryReadArray + i;
 
 		readID = queryRead->readID;
 		queryPos = queryRead->queryPos;
@@ -418,12 +428,12 @@ short computeFragSizeLeftRegQueryIndel(queryIndel_t *queryIndel, int32_t startQu
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeFragSizeRightRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short computeFragSizeRightRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet)
 {
 	int64_t i, pairNumValid, queryID, queryID_paired, readID, readID_paired, queryPos, queryPos_paired, orient, orient_paired, seqLen, seqLen_paired, midPos;
-	int64_t discorNum, pairNumTotal;
-	queryRead_t *queryRead;
-	double fragSize, fragSizeSum;
+	int32_t discorNum, pairNumTotal, setID, queryReadNum;
+	queryRead_t *queryRead, *queryReadArray;
+	double insertSize, standDev, fragSize, fragSizeSum;
 	char orientCh1, orientCh2;
 
 	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
@@ -433,13 +443,19 @@ short computeFragSizeRightRegQueryIndel(queryIndel_t *queryIndel, int32_t startQ
 	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
 	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
 
+	setID = readSet->setID;
+	insertSize = readSet->insertSize;
+	standDev = readSet->standDev;
+
 	discorNum = pairNumTotal = 0;
 	fragSizeSum = 0;
 	pairNumValid = 0;
 	queryID = queryItem->queryID;
-	for(i=0; i<queryItem->queryReadNum; i++)
+	queryReadArray = queryItem->queryReadSetArray[setID-1].queryReadArray;
+	queryReadNum = queryItem->queryReadSetArray[setID-1].queryReadNum;
+	for(i=0; i<queryReadNum; i++)
 	{
-		queryRead = queryItem->queryReadArray + i;
+		queryRead = queryReadArray + i;
 
 		readID = queryRead->readID;
 		queryPos = queryRead->queryPos;
@@ -552,17 +568,17 @@ short computeFragSizeRightRegQueryIndel(queryIndel_t *queryIndel, int32_t startQ
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeFragSizeBothRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosLeft, int32_t endQueryPosLeft, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet, double insertSize, double standDev)
+short computeFragSizeBothRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosLeft, int32_t endQueryPosLeft, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet)
 {
 	// compute the fragment size of paired-end reads in the left region
-	if(computeFragSizeLeftRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, queryItem, readSet, insertSize, standDev)==FAILED)
+	if(computeFragSizeLeftRegQueryIndel(queryIndel, startQueryPosLeft, endQueryPosLeft, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// compute the fragment size of paired-end reads in the right region
-	if(computeFragSizeRightRegQueryIndel(queryIndel, startQueryPosRight, endQueryPosRight, queryItem, readSet, insertSize, standDev)==FAILED)
+	if(computeFragSizeRightRegQueryIndel(queryIndel, startQueryPosRight, endQueryPosRight, queryItem, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the fragment size, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -635,7 +651,7 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+					if(queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
 						queryIndel->misassFlag = TRUE_MISASS;
 					else if(queryIndel->disagreeNum>0)
 					{
@@ -676,7 +692,7 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+					if(queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
 						queryIndel->misassFlag = TRUE_MISASS;
 					else if(queryIndel->disagreeNum>0)
 					{
@@ -716,7 +732,7 @@ short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, 
 
 				if((difAll<2*standDev || difAll<0.2*insertSize) || (queryIndel->discorRatioLeft>0.1 || queryIndel->discorRatioRight>0.1))
 				{
-					if((difAll<dif && difAll<20) && (queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1))
+					if(queryIndel->disagreeNum>0 || queryIndel->zeroCovNum>0 || queryIndel->lowCovRegNum>1 || queryIndel->highCovRegNum>1)
 						queryIndel->misassFlag = TRUE_MISASS;
 					else if(queryIndel->disagreeNum>0)
 					{

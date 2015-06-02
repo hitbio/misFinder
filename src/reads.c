@@ -14,48 +14,110 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short constructReadset(readSet_t **readSet, char **readsFileNames, int32_t readsFileNum, int32_t readsFileFormatType, int32_t reserveHashItemBlocksFlag)
+short constructReadsetArray(readSetArr_t **readSetArray, readFile_t *readFileList)
 {
-	if(readsFileFormatType==FILE_FORMAT_FASTA)
+	readFile_t *readFileNode;
+	int32_t readSetNum;
+
+	readSetNum = 0;
+	readFileNode = readFileList;
+	while(readFileNode)
 	{
-		if(pairedMode==1)
+		readSetNum ++;
+		readFileNode = readFileNode->next;
+	}
+
+	*readSetArray = (readSetArr_t*) calloc (1, sizeof(readSetArr_t));
+	if((*readSetArray)==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+	(*readSetArray)->readSetNum = readSetNum;
+
+	(*readSetArray)->readSetArray = (readSet_t*) calloc (readSetNum, sizeof(readSet_t));
+	if((*readSetArray)->readSetArray==NULL)
+	{
+		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+	readSetNum = 0;
+	readFileNode = readFileList;
+	while(readFileNode)
+	{
+		// load the reads data to readSet
+		if(constructReadset((*readSetArray)->readSetArray+readSetNum, readFileNode)==FAILED)
 		{
-			if(constructReadsetByPEFastaSeparate(readSet, readsFileNames, readsFileNum)==FAILED)
+			printf("line=%d, In %s(), cannot construct read set, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		(*readSetArray)->readSetArray[readSetNum].setID = readSetNum + 1;
+		(*readSetArray)->readSetArray[readSetNum].readType = readFileNode->readType;
+		(*readSetArray)->readSetArray[readSetNum].pairedMode = readFileNode->pairedMode;
+
+		readSetNum ++;
+
+		readFileNode = readFileNode->next;
+	}
+
+	return SUCCESSFUL;
+}
+
+
+/**
+ * Build read set.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short constructReadset(readSet_t *readSet, readFile_t *readFileNode)
+{
+	struct timeval tpstart, tpend;
+	double timeused_readset;
+	gettimeofday(&tpstart, NULL);
+
+	printf("Loading reads information ...\n");
+
+	if(readFileNode->readsFileFormatType==FILE_FORMAT_FASTA)
+	{
+		if(readFileNode->pairedMode==1)
+		{
+			if(constructReadsetByPEFastaSeparate(readSet, readFileNode->readFiles, readFileNode->readFileNum)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot construct the read set, Error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-		}else if(pairedMode==2)
+		}else if(readFileNode->pairedMode==2)
 		{
-			if(constructReadsetByPEFastaInterleaved(readSet, readsFileNames, readsFileNum)==FAILED)
+			if(constructReadsetByPEFastaInterleaved(readSet, readFileNode->readFiles, readFileNode->readFileNum)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot construct the graph, Error!\n", __LINE__, __func__);
 				return FAILED;
 			}
 		}else
 		{
-			printf("Invalid paired mode %d, error!\n", pairedMode);
+			printf("Invalid paired mode %d, error!\n", readFileNode->pairedMode);
 			return FAILED;
 		}
-	}else if(readsFileFormatType==FILE_FORMAT_FASTQ)
+	}else if(readFileNode->readsFileFormatType==FILE_FORMAT_FASTQ)
 	{
-		if(pairedMode==1)
+		if(readFileNode->pairedMode==1)
 		{
-			if(constructReadsetByPEFastqSeparate(readSet, readsFileNames, readsFileNum)==FAILED)
+			if(constructReadsetByPEFastqSeparate(readSet, readFileNode->readFiles, readFileNode->readFileNum)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot construct the graph, Error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-		}else if(pairedMode==2)
+		}else if(readFileNode->pairedMode==2)
 		{
-			if(constructReadsetByPEFastqInterleaved(readSet, readsFileNames, readsFileNum)==FAILED)
+			if(constructReadsetByPEFastqInterleaved(readSet, readFileNode->readFiles, readFileNode->readFileNum)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot construct the graph, Error!\n", __LINE__, __func__);
 				return FAILED;
 			}
 		}else
 		{
-			printf("Invalid paired mode %d, error!\n", pairedMode);
+			printf("Invalid paired mode %d, error!\n", readFileNode->pairedMode);
 			return FAILED;
 		}
 	}else
@@ -65,21 +127,23 @@ short constructReadset(readSet_t **readSet, char **readsFileNames, int32_t reads
 	}
 
 	// compute the maxReadLen
-	if(computeMaxReadLenInReadset(*readSet)==FAILED)
+	if(computeMaxReadLenInReadset(readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the maximal read length in read set, Error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	if(reserveHashItemBlocksFlag==NO)
-	{
-		releaseHashItemReadset(*readSet);
-	}
+	releaseHashItemReadset(readSet);
 
 	// ########################### Debug information ######################
 	// Output read sequences in read set
-	//outputReadseqInReadset("../output/reads.txt", *readSet);
+	//outputReadseqInReadset("../output/reads.txt", readSet);
 	// ########################### Debug information ######################
+
+	gettimeofday(&tpend, NULL);
+	timeused_readset = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
+
+	printf("Loading reads used time: %.2f seconds.\n", timeused_readset);
 
 	return SUCCESSFUL;
 }
@@ -89,19 +153,15 @@ short constructReadset(readSet_t **readSet, char **readsFileNames, int32_t reads
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNames, int32_t readsFileNum)
+short constructReadsetByPEFastaSeparate(readSet_t *readSet, char **readsFileNames, int32_t readsFileNum)
 {
 	readBuf_t *readBuf[2];
 	FILE *fp1, *fp2;
-	uint64_t i, j, tmpReadsNum[2], tmpFileID;
-	int32_t percent;
+	uint32_t i, j, tmpReadsNum[2], tmpFileID;
+	int32_t percent, seqIntEntriesNum;
 	int64_t tmpReadCount;
 
-	struct timeval tpstart, tpend;
-	double timeused_readset;
-	gettimeofday(&tpstart, NULL);
-
-	printf("Loading reads information ...\n");
+	seqIntEntriesNum = (MAX_READ_BUF_SIZE - 1)  / 32 + 1;
 	for(i=0; i<2; i++)
 	{
 		readBuf[i] = (readBuf_t*)calloc(MAX_READ_BUF_SIZE, sizeof(readBuf_t));
@@ -119,6 +179,13 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 				return FAILED;
 			}
 			readBuf[i][j].qual = NULL;
+			readBuf[i][j].pReadseqInt = (uint64_t *) calloc(seqIntEntriesNum, sizeof(uint64_t));
+			if(readBuf[i][j].pReadseqInt==NULL)
+			{
+				printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+				return FAILED;
+			}
+			readBuf[i][j].pReadseqHashItem = NULL;
 		}
 	}
 
@@ -129,13 +196,13 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 		return FAILED;
 	}
 
-	pReadBlockTmp = (*readSet)->readBlockArr + (*readSet)->blocksNumRead - 1;
+	pReadBlockTmp = readSet->readBlockArr + readSet->blocksNumRead - 1;
 	pReadTmpDoing = pReadBlockTmp->readArr;
 
-	pReadseqBlockTmp = (*readSet)->readseqBlockArr + (*readSet)->blocksNumReadseq - 1;
+	pReadseqBlockTmp = readSet->readseqBlockArr + readSet->blocksNumReadseq - 1;
 	pReadseqTmpDoing = pReadseqBlockTmp->readseqArr;
 
-	pReadseqHashItemBlockTmp = (*readSet)->readseqHashItemBlockArr + (*readSet)->blocksNumReadseqHashItem - 1;
+	pReadseqHashItemBlockTmp = readSet->readseqHashItemBlockArr + readSet->blocksNumReadseqHashItem - 1;
 	pReadseqHashItemTmpDoing = pReadseqHashItemBlockTmp->readseqHashItemArr;
 
 	percent = 0;
@@ -191,6 +258,18 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 				return FAILED;
 			}
 
+			// generate the readseq integer
+			if(generateReadseqIntInBuf(readBuf[0], tmpReadsNum[0], readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+			if(generateReadseqIntInBuf(readBuf[1], tmpReadsNum[1], readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
 			//...
 			for(i=0; i<tmpReadsNum[0]; i++)
 			{
@@ -199,13 +278,13 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 					tmpReadCount ++;
 
 					//add a read
-					if(addReadToReadset(readBuf[j][i].seq, NULL, readBuf[j][i].len, *readSet)==FAILED)
+					if(addReadToReadset(readBuf[j]+i, readSet)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot add read to read set, error!\n", __LINE__, __func__);
 						return FAILED;
 					}
 
-					if(tmpReadCount%1000000==0)
+					if(tmpReadCount%2000000==0)
 						printf("Sequences processed: %ld\n", tmpReadCount);
 
 				}
@@ -218,7 +297,7 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 		fp2 = NULL;
 	}
 
-	if(tmpReadCount%1000000!=0)
+	if(tmpReadCount%2000000!=0)
 		printf("Sequences processed: %ld\n", tmpReadCount);
 
 	for(i=0; i<2; i++)
@@ -226,6 +305,7 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 		for(j=0; j<MAX_READ_BUF_SIZE; j++)
 		{
 			free(readBuf[i][j].seq);
+			free(readBuf[i][j].pReadseqInt);
 		}
 		free(readBuf[i]);
 	}
@@ -234,31 +314,25 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
 	if(pReadBlockTmp->itemNum==0)
 	{
 		free(pReadBlockTmp->readArr);
-		(*readSet)->readBlockArr[(*readSet)->blocksNumRead-1].readArr = NULL;
-		(*readSet)->blocksNumRead --;
+		readSet->readBlockArr[readSet->blocksNumRead-1].readArr = NULL;
+		readSet->blocksNumRead --;
 	}
 
 	// the last readseq block is empty, remove it
 	if(pReadseqBlockTmp->rowsNum==0)
 	{
 		free(pReadseqBlockTmp->readseqArr);
-		(*readSet)->readseqBlockArr[(*readSet)->blocksNumReadseq-1].readseqArr = NULL;
-		(*readSet)->blocksNumReadseq --;
+		readSet->readseqBlockArr[readSet->blocksNumReadseq-1].readseqArr = NULL;
+		readSet->blocksNumReadseq --;
 	}
 
 	// the last readseq hash item block is empty, remove it
 	if(pReadseqHashItemBlockTmp->itemNum==0)
 	{
 		free(pReadseqHashItemBlockTmp->readseqHashItemArr);
-		(*readSet)->readseqHashItemBlockArr[(*readSet)->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
-		(*readSet)->blocksNumReadseqHashItem --;
+		readSet->readseqHashItemBlockArr[readSet->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
+		readSet->blocksNumReadseqHashItem --;
 	}
-
-
-	gettimeofday(&tpend, NULL);
-	timeused_readset = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
-
-	printf("Loading reads used time: %.2f seconds.\n", timeused_readset);
 
 	return SUCCESSFUL;
 }
@@ -268,22 +342,38 @@ short constructReadsetByPEFastaSeparate(readSet_t **readSet, char **readsFileNam
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short constructReadsetByPEFastaInterleaved(readSet_t **readSet, char **readsFileNames, int32_t readsFileNum)
+short constructReadsetByPEFastaInterleaved(readSet_t *readSet, char **readsFileNames, int32_t readsFileNum)
 {
+	readBuf_t *readBuf;
 	FILE* srcfp;
-	int32_t i, tmpFileID, percent;
+	int32_t i, tmpFileID, percent, tmpReadsNum, seqIntEntriesNum;
 	char ch, seq_data[MAX_READ_LEN_IN_BUF+1]; // read sequence, read quality data which is encoded in ASCII
 	int64_t tmpReadCount;
 
-	struct timeval tpstart, tpend;
-	double timeused_readset;
-	gettimeofday(&tpstart, NULL);
-
-
-	printf("Loading reads information ...\n");
-
-	tmpReadCount = 0;
-	percent = 0;
+	seqIntEntriesNum = (MAX_READ_BUF_SIZE - 1)  / 32 + 1;
+	readBuf = (readBuf_t*)calloc(MAX_READ_BUF_SIZE, sizeof(readBuf_t));
+	if(readBuf==NULL)
+	{
+		printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+		return FAILED;
+	}
+	for(i=0; i<MAX_READ_BUF_SIZE; i++)
+	{
+		readBuf[i].seq = (char *)malloc(sizeof(char)*(MAX_READ_LEN_IN_BUF+1));
+		if(readBuf[i].seq==NULL)
+		{
+			printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+			return FAILED;
+		}
+		readBuf[i].qual = NULL;
+		readBuf[i].pReadseqInt = (uint64_t *) calloc(seqIntEntriesNum, sizeof(uint64_t));
+		if(readBuf[i].pReadseqInt==NULL)
+		{
+			printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+			return FAILED;
+		}
+		readBuf[i].pReadseqHashItem = NULL;
+	}
 
 	// initialize read set
 	if(initReadSet(readSet)==FAILED)
@@ -292,15 +382,17 @@ short constructReadsetByPEFastaInterleaved(readSet_t **readSet, char **readsFile
 		return FAILED;
 	}
 
-	pReadBlockTmp = (*readSet)->readBlockArr + (*readSet)->blocksNumRead - 1;
+	pReadBlockTmp = readSet->readBlockArr + readSet->blocksNumRead - 1;
 	pReadTmpDoing = pReadBlockTmp->readArr;
 
-	pReadseqBlockTmp = (*readSet)->readseqBlockArr + (*readSet)->blocksNumReadseq - 1;
+	pReadseqBlockTmp = readSet->readseqBlockArr + readSet->blocksNumReadseq - 1;
 	pReadseqTmpDoing = pReadseqBlockTmp->readseqArr;
 
-	pReadseqHashItemBlockTmp = (*readSet)->readseqHashItemBlockArr + (*readSet)->blocksNumReadseqHashItem - 1;
+	pReadseqHashItemBlockTmp = readSet->readseqHashItemBlockArr + readSet->blocksNumReadseqHashItem - 1;
 	pReadseqHashItemTmpDoing = pReadseqHashItemBlockTmp->readseqHashItemArr;
 
+	tmpReadCount = 0;
+	percent = 0;
 
 	for(tmpFileID=0; tmpFileID<readsFileNum; tmpFileID++)
 	{
@@ -311,70 +403,79 @@ short constructReadsetByPEFastaInterleaved(readSet_t **readSet, char **readsFile
 			return FAILED;
 		}
 
-		ch = fgetc(srcfp);
-		while(!feof(srcfp))
+		while(1)
 		{
-			while(ch!='\n') ch = fgetc(srcfp);
+			// check the end of files
+			if(feof(srcfp))
+				break;
 
-			i = 0;
-			ch = fgetc(srcfp);
-			while(ch!='>' && ch!=-1)
+			// fille the reads to reads buffers
+			if(fillReadsToBufFasta(srcfp, readBuf, &tmpReadsNum)==FAILED)
 			{
-				if(ch!='\n')
-					seq_data[i++] = ch;
-				ch = fgetc(srcfp);
-			}
-			seq_data[i] = '\0';
-
-			tmpReadCount ++;
-
-			//add a read
-			if(addReadToReadset(seq_data, NULL, i, *readSet)==FAILED)
-			{
-				printf("line=%d, In %s(), cannot add read to read set, error!\n", __LINE__, __func__);
+				printf("line=%d, In %s(), cannot fill the read buffer, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
 
-			if(tmpReadCount%1000000==0)
-				printf("Sequences processed: %ld\n", tmpReadCount);
+			// generate the readseq integer
+			if(generateReadseqIntInBuf(readBuf, tmpReadsNum, readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
 
+			for(i=0; i<tmpReadsNum; i++)
+			{
+				tmpReadCount ++;
+
+				//add a read
+				if(addReadToReadset(readBuf+i, readSet)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot add read to read set, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				if(tmpReadCount%2000000==0)
+					printf("Sequences processed: %ld\n", tmpReadCount);
+			}
 		}
 
 		fclose(srcfp);
 		srcfp = NULL;
 	}
 
-	if(tmpReadCount%1000000!=0)
+	if(tmpReadCount%2000000!=0)
 		printf("Sequences processed: %ld\n", tmpReadCount);
+
+	for(i=0; i<MAX_READ_BUF_SIZE; i++)
+	{
+		free(readBuf[i].seq);
+		free(readBuf[i].pReadseqInt);
+	}
+	free(readBuf);
 
 	// the last read block is empty, remove it
 	if(pReadBlockTmp->itemNum==0)
 	{
 		free(pReadBlockTmp->readArr);
-		(*readSet)->readBlockArr[(*readSet)->blocksNumRead-1].readArr = NULL;
-		(*readSet)->blocksNumRead --;
+		readSet->readBlockArr[readSet->blocksNumRead-1].readArr = NULL;
+		readSet->blocksNumRead --;
 	}
 
 	// the last readseq block is empty, remove it
 	if(pReadseqBlockTmp->rowsNum==0)
 	{
 		free(pReadseqBlockTmp->readseqArr);
-		(*readSet)->readseqBlockArr[(*readSet)->blocksNumReadseq-1].readseqArr = NULL;
-		(*readSet)->blocksNumReadseq --;
+		readSet->readseqBlockArr[readSet->blocksNumReadseq-1].readseqArr = NULL;
+		readSet->blocksNumReadseq --;
 	}
 
 	// the last readseq hash item block is empty, remove it
 	if(pReadseqHashItemBlockTmp->itemNum==0)
 	{
 		free(pReadseqHashItemBlockTmp->readseqHashItemArr);
-		(*readSet)->readseqHashItemBlockArr[(*readSet)->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
-		(*readSet)->blocksNumReadseqHashItem --;
+		readSet->readseqHashItemBlockArr[readSet->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
+		readSet->blocksNumReadseqHashItem --;
 	}
-
-	gettimeofday(&tpend, NULL);
-	timeused_readset = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
-
-	printf("Loading reads used time: %.2f seconds.\n", timeused_readset);
 
 	return SUCCESSFUL;
 }
@@ -384,21 +485,15 @@ short constructReadsetByPEFastaInterleaved(readSet_t **readSet, char **readsFile
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNames, int32_t readsFileNum)
+short constructReadsetByPEFastqSeparate(readSet_t *readSet, char **readsFileNames, int32_t readsFileNum)
 {
 	readBuf_t *readBuf[2];
 	FILE *fp1, *fp2;
-	uint64_t i, j, tmpReadsNum[2], tmpFileID;
-	int percent;
+	uint32_t i, j, tmpReadsNum[2], tmpFileID;
+	int32_t percent, seqIntEntriesNum;
 	int64_t tmpReadCount;
 
-	struct timeval tpstart, tpend;
-	double timeused_readset;
-	gettimeofday(&tpstart, NULL);
-
-
-	printf("Loading reads information ...\n");
-
+	seqIntEntriesNum = (MAX_READ_BUF_SIZE - 1)  / 32 + 1;
 	for(i=0; i<2; i++)
 	{
 		readBuf[i] = (readBuf_t*)calloc(MAX_READ_BUF_SIZE, sizeof(readBuf_t));
@@ -421,6 +516,13 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 				printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
 				return FAILED;
 			}
+			readBuf[i][j].pReadseqInt = (uint64_t *) calloc(seqIntEntriesNum, sizeof(uint64_t));
+			if(readBuf[i][j].pReadseqInt==NULL)
+			{
+				printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+				return FAILED;
+			}
+			readBuf[i][j].pReadseqHashItem = NULL;
 		}
 	}
 
@@ -431,13 +533,13 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 		return FAILED;
 	}
 
-	pReadBlockTmp = (*readSet)->readBlockArr + (*readSet)->blocksNumRead - 1;
+	pReadBlockTmp = readSet->readBlockArr + readSet->blocksNumRead - 1;
 	pReadTmpDoing = pReadBlockTmp->readArr;
 
-	pReadseqBlockTmp = (*readSet)->readseqBlockArr + (*readSet)->blocksNumReadseq - 1;
+	pReadseqBlockTmp = readSet->readseqBlockArr + readSet->blocksNumReadseq - 1;
 	pReadseqTmpDoing = pReadseqBlockTmp->readseqArr;
 
-	pReadseqHashItemBlockTmp = (*readSet)->readseqHashItemBlockArr + (*readSet)->blocksNumReadseqHashItem - 1;
+	pReadseqHashItemBlockTmp = readSet->readseqHashItemBlockArr + readSet->blocksNumReadseqHashItem - 1;
 	pReadseqHashItemTmpDoing = pReadseqHashItemBlockTmp->readseqHashItemArr;
 
 
@@ -488,6 +590,18 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 				return FAILED;
 			}
 
+			// generate the readseq integer
+			if(generateReadseqIntInBuf(readBuf[0], tmpReadsNum[0], readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+			if(generateReadseqIntInBuf(readBuf[1], tmpReadsNum[1], readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
 			//...
 			for(i=0; i<tmpReadsNum[0]; i++)
 			{
@@ -496,13 +610,13 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 					tmpReadCount ++;
 
 					//add a read
-					if(addReadToReadset(readBuf[j][i].seq, readBuf[j][i].qual, readBuf[j][i].len, *readSet)==FAILED)
+					if(addReadToReadset(readBuf[j]+i, readSet)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot add read to read set, error!\n", __LINE__, __func__);
 						return FAILED;
 					}
 
-					if(tmpReadCount%1000000==0)
+					if(tmpReadCount%2000000==0)
 						printf("Sequences processed: %ld\n", tmpReadCount);
 
 				}
@@ -515,7 +629,7 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 		fp2 = NULL;
 	}
 
-	if(tmpReadCount%1000000!=0)
+	if(tmpReadCount%2000000!=0)
 		printf("Sequences processed: %ld\n", tmpReadCount);
 
 	for(i=0; i<2; i++)
@@ -524,6 +638,7 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 		{
 			free(readBuf[i][j].seq);
 			free(readBuf[i][j].qual);
+			free(readBuf[i][j].pReadseqInt);
 		}
 		free(readBuf[i]);
 	}
@@ -532,30 +647,25 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
 	if(pReadBlockTmp->itemNum==0)
 	{
 		free(pReadBlockTmp->readArr);
-		(*readSet)->readBlockArr[(*readSet)->blocksNumRead-1].readArr = NULL;
-		(*readSet)->blocksNumRead --;
+		readSet->readBlockArr[readSet->blocksNumRead-1].readArr = NULL;
+		readSet->blocksNumRead --;
 	}
 
 	// the last readseq block is empty, remove it
 	if(pReadseqBlockTmp->rowsNum==0)
 	{
 		free(pReadseqBlockTmp->readseqArr);
-		(*readSet)->readseqBlockArr[(*readSet)->blocksNumReadseq-1].readseqArr = NULL;
-		(*readSet)->blocksNumReadseq --;
+		readSet->readseqBlockArr[readSet->blocksNumReadseq-1].readseqArr = NULL;
+		readSet->blocksNumReadseq --;
 	}
 
 	// the last readseq hash item block is empty, remove it
 	if(pReadseqHashItemBlockTmp->itemNum==0)
 	{
 		free(pReadseqHashItemBlockTmp->readseqHashItemArr);
-		(*readSet)->readseqHashItemBlockArr[(*readSet)->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
-		(*readSet)->blocksNumReadseqHashItem --;
+		readSet->readseqHashItemBlockArr[readSet->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
+		readSet->blocksNumReadseqHashItem --;
 	}
-
-	gettimeofday(&tpend, NULL);
-	timeused_readset = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
-
-	printf("Loading reads used time: %.2f seconds.\n", timeused_readset);
 
 	return SUCCESSFUL;
 }
@@ -565,21 +675,43 @@ short constructReadsetByPEFastqSeparate(readSet_t **readSet, char **readsFileNam
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short constructReadsetByPEFastqInterleaved(readSet_t **readSet, char **readsFileNames, int32_t readsFileNum)
+short constructReadsetByPEFastqInterleaved(readSet_t *readSet, char **readsFileNames, int32_t readsFileNum)
 {
+	readBuf_t *readBuf;
 	FILE* srcfp;
-	int32_t i, tmpLen, line_index, tmpFileID, percent, headlen;
-	char ch, seq_data[MAX_READ_LEN_IN_BUF+1], qual_data[MAX_READ_LEN_IN_BUF+1]; // read sequence, read quality data which is encoded in ASCII
+	int32_t i, tmpLen, line_index, tmpFileID, percent, headlen, tmpReadsNum, seqIntEntriesNum;
+	char ch;
 	int64_t tmpReadCount;
 
-	struct timeval tpstart, tpend;
-	double timeused_readset;
-	gettimeofday(&tpstart, NULL);
-
-	printf("Loading reads information ...\n");
-
-	tmpReadCount = 0;
-	percent = 0;
+	seqIntEntriesNum = (MAX_READ_BUF_SIZE - 1)  / 32 + 1;
+	readBuf = (readBuf_t*)calloc(MAX_READ_BUF_SIZE, sizeof(readBuf_t));
+	if(readBuf==NULL)
+	{
+		printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+		return FAILED;
+	}
+	for(i=0; i<MAX_READ_BUF_SIZE; i++)
+	{
+		readBuf[i].seq = (char *)malloc(sizeof(char)*(MAX_READ_LEN_IN_BUF+1));
+		if(readBuf[i].seq==NULL)
+		{
+			printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+			return FAILED;
+		}
+		readBuf[i].qual = (char *)malloc(sizeof(char)*(MAX_READ_LEN_IN_BUF+1));
+		if(readBuf[i].qual==NULL)
+		{
+			printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+			return FAILED;
+		}
+		readBuf[i].pReadseqInt = (uint64_t *) calloc(seqIntEntriesNum, sizeof(uint64_t));
+		if(readBuf[i].pReadseqInt==NULL)
+		{
+			printf("line=%d, In %s(), can not allocate memory, Error.\n", __LINE__,  __func__);
+			return FAILED;
+		}
+		readBuf[i].pReadseqHashItem = NULL;
+	}
 
 	// initialize read set
 	if(initReadSet(readSet)==FAILED)
@@ -588,15 +720,17 @@ short constructReadsetByPEFastqInterleaved(readSet_t **readSet, char **readsFile
 		return FAILED;
 	}
 
-	pReadBlockTmp = (*readSet)->readBlockArr + (*readSet)->blocksNumRead - 1;
+	pReadBlockTmp = readSet->readBlockArr + readSet->blocksNumRead - 1;
 	pReadTmpDoing = pReadBlockTmp->readArr;
 
-	pReadseqBlockTmp = (*readSet)->readseqBlockArr + (*readSet)->blocksNumReadseq - 1;
+	pReadseqBlockTmp = readSet->readseqBlockArr + readSet->blocksNumReadseq - 1;
 	pReadseqTmpDoing = pReadseqBlockTmp->readseqArr;
 
-	pReadseqHashItemBlockTmp = (*readSet)->readseqHashItemBlockArr + (*readSet)->blocksNumReadseqHashItem - 1;
+	pReadseqHashItemBlockTmp = readSet->readseqHashItemBlockArr + readSet->blocksNumReadseqHashItem - 1;
 	pReadseqHashItemTmpDoing = pReadseqHashItemBlockTmp->readseqHashItemArr;
 
+	tmpReadCount = 0;
+	percent = 0;
 	for(tmpFileID=0; tmpFileID<readsFileNum; tmpFileID++)
 	{
 		srcfp = fopen(readsFileNames[tmpFileID], "r");
@@ -606,61 +740,40 @@ short constructReadsetByPEFastqInterleaved(readSet_t **readSet, char **readsFile
 			return FAILED;
 		}
 
-		line_index = 0;
-		ch = fgetc(srcfp);
-		while(!feof(srcfp))
+		while(1)
 		{
-			if(line_index==0)  //the sequence name line
-			{
-				headlen = 0;
-				ch = fgetc(srcfp);
-				while(ch!='\n' && ch!=-1)
-					ch = fgetc(srcfp);
-			}else if(line_index==1)  //the sequence line
-			{
-				tmpLen = 0;
-				ch = fgetc(srcfp);
-				while(ch!='\n' && ch!=-1)
-				{
-					seq_data[tmpLen++] = ch;
-					ch = fgetc(srcfp);
-				}
-				seq_data[tmpLen] = '\0';
-			}else if(line_index==2)  //the sequence name line
-			{
-				ch = fgetc(srcfp);
-				while(ch!='\n' && ch!=-1)
-				{
-					ch = fgetc(srcfp);
-				}
-			}else
-			{
-				i = 0;
-				ch = fgetc(srcfp);
-				while(ch!='\n' && ch!=-1)
-				{
-					qual_data[i++] = ch;
-					ch = fgetc(srcfp);
-				}
-				qual_data[i] = '\0';
-			}
-			line_index++;
+			// check the end of file
+			if(feof(srcfp))
+				break;
 
-			if(line_index==4)  //the sequence is read finished, construct the read
+			// fille the reads to reads buffers
+			if(fillReadsToBufFastq(srcfp, readBuf, &tmpReadsNum)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot fill the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			// generate the readseq integer
+			if(generateReadseqIntInBuf(readBuf, tmpReadsNum, readSet)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate the read seqInt the read buffer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			// add the read
+			for(i=0; i<tmpReadsNum; i++)
 			{
 				tmpReadCount ++;
 
 				//add a read
-				if(addReadToReadset(seq_data, qual_data, tmpLen, *readSet)==FAILED)
+				if(addReadToReadset(readBuf+i, readSet)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot add read to read set, error!\n", __LINE__, __func__);
 					return FAILED;
 				}
 
-				if(tmpReadCount%1000000==0)
+				if(tmpReadCount%2000000==0)
 					printf("Sequences processed: %ld\n", tmpReadCount);
-
-				line_index = 0;
 			}
 		}
 
@@ -668,37 +781,41 @@ short constructReadsetByPEFastqInterleaved(readSet_t **readSet, char **readsFile
 		srcfp = NULL;
 	}
 
-	if(tmpReadCount%1000000!=0)
+	if(tmpReadCount%2000000!=0)
 		printf("Sequences processed: %ld\n", tmpReadCount);
+
+	for(i=0; i<MAX_READ_BUF_SIZE; i++)
+	{
+		free(readBuf[i].seq);
+		free(readBuf[i].qual);
+		free(readBuf[i].pReadseqInt);
+		readBuf[i].pReadseqHashItem = NULL;
+	}
+	free(readBuf);
 
 	// the last read block is empty, remove it
 	if(pReadBlockTmp->itemNum==0)
 	{
 		free(pReadBlockTmp->readArr);
-		(*readSet)->readBlockArr[(*readSet)->blocksNumRead-1].readArr = NULL;
-		(*readSet)->blocksNumRead --;
+		readSet->readBlockArr[readSet->blocksNumRead-1].readArr = NULL;
+		readSet->blocksNumRead --;
 	}
 
 	// the last readseq block is empty, remove it
 	if(pReadseqBlockTmp->rowsNum==0)
 	{
 		free(pReadseqBlockTmp->readseqArr);
-		(*readSet)->readseqBlockArr[(*readSet)->blocksNumReadseq-1].readseqArr = NULL;
-		(*readSet)->blocksNumReadseq --;
+		readSet->readseqBlockArr[readSet->blocksNumReadseq-1].readseqArr = NULL;
+		readSet->blocksNumReadseq --;
 	}
 
 	// the last readseq hash item block is empty, remove it
 	if(pReadseqHashItemBlockTmp->itemNum==0)
 	{
 		free(pReadseqHashItemBlockTmp->readseqHashItemArr);
-		(*readSet)->readseqHashItemBlockArr[(*readSet)->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
-		(*readSet)->blocksNumReadseqHashItem --;
+		readSet->readseqHashItemBlockArr[readSet->blocksNumReadseqHashItem-1].readseqHashItemArr = NULL;
+		readSet->blocksNumReadseqHashItem --;
 	}
-
-	gettimeofday(&tpend, NULL);
-	timeused_readset = tpend.tv_sec-tpstart.tv_sec+ (double)(tpend.tv_usec-tpstart.tv_usec)/1000000;
-
-	printf("Loading reads used time: %.2f seconds.\n", timeused_readset);
 
 	return SUCCESSFUL;
 }
@@ -708,9 +825,9 @@ short constructReadsetByPEFastqInterleaved(readSet_t **readSet, char **readsFile
  *  @return:
  *  	If succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short fillReadsToBufFasta(FILE *fpReads, readBuf_t *pBuf, uint64_t *readsNum)
+short fillReadsToBufFasta(FILE *fpReads, readBuf_t *pBuf, int32_t *readsNum)
 {
-	uint64_t i;
+	int64_t i;
 	int returnCode;
 
 	*readsNum = 0;
@@ -736,7 +853,7 @@ short fillReadsToBufFasta(FILE *fpReads, readBuf_t *pBuf, uint64_t *readsNum)
  *  @return:
  *  	If succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short fillReadsToBufFastq(FILE *fpReads, readBuf_t *pBuf, uint64_t *readsNum)
+short fillReadsToBufFastq(FILE *fpReads, readBuf_t *pBuf, int32_t *readsNum)
 {
 	uint64_t i;
 	int returnCode;
@@ -883,6 +1000,71 @@ short getSingleReadFastq(FILE *fpPE, readBuf_t *pReadBuf)
 }
 
 /**
+ * Compute the read seqInt of reads in buffer.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short generateReadseqIntInBuf(readBuf_t *readBuf, int32_t tmpReadsNum, readSet_t *readSet)
+{
+	int32_t i, seqIntEntriesNum;
+
+	// generate the readseq integer
+	for(i=0; i<tmpReadsNum; i++)
+	{
+		if(computeValidFlagBufRead(readBuf+i)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot compute the valid flag of a read, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		if(readBuf[i].validFlag==YES)
+		{
+			seqIntEntriesNum = (readBuf[i].len - 1) / 32 + 1;
+			if(generateReadseqInt(readBuf[i].pReadseqInt, readBuf[i].seq, readBuf[i].len, seqIntEntriesNum)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot generate read sequence integer, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			readBuf[i].hashcode = readseqHashInt(readBuf[i].pReadseqInt, readBuf[i].len, seqIntEntriesNum);
+			readBuf[i].pReadseqHashItem = getReadseqHashItemByHash(readBuf[i].hashcode, readBuf[i].pReadseqInt, readBuf[i].len, seqIntEntriesNum, readSet);
+		}
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute the valid flag of a read.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short computeValidFlagBufRead(readBuf_t *pBufRead)
+{
+	if(getRatioBase(pBufRead->seq, 'A')<ARTIFACTS_BASE_A_THRESHOLD)
+	{
+		pBufRead->nBaseNum = getUnknownBaseNum(pBufRead->seq);
+		if(pBufRead->nBaseNum==0)
+			pBufRead->validFlag = YES;
+		else
+		{
+			pBufRead->validFlag = NO;
+			if(replaceUnknownBasesInReads(pBufRead->seq, pBufRead->nBaseNum)==FAILED)
+			{
+				printf("line=%d, In %s(), cannot replace unknown bases in reads, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+		}
+	}else
+	{
+		pBufRead->validFlag = NO;
+		pBufRead->nBaseNum = 0;
+	}
+
+	return SUCCESSFUL;
+}
+
+/**
  * Get the unknown base count.
  *  @return:
  *  	Return the count.
@@ -928,33 +1110,13 @@ float getRatioBase(char *seq, char targetBase)
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *readSet)
+short addReadToReadset(readBuf_t *pBufRead, readSet_t *readSet)
 {
-	int32_t entriesNum, validFlag, unknownBaseNum;
-	uint64_t hashcode;
+	int32_t entriesNum;
 	readseqHashItem_t *pReadseqHashItem;
 
-	if(getRatioBase(seq, 'A')<ARTIFACTS_BASE_A_THRESHOLD)
-	{
-		unknownBaseNum = getUnknownBaseNum(seq);
-		if(unknownBaseNum==0)
-			validFlag = YES;
-		else
-		{
-			validFlag = NO;
-			if(replaceUnknownBasesInReads(seq, unknownBaseNum)==FAILED)
-			{
-				printf("line=%d, In %s(), cannot replace unknown bases in reads, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-		}
-	}else
-		validFlag = NO;
-
-
-	entriesNum = ((seqLen - 1) >> 5) + 1;
-
-	if(validFlag==YES)
+	entriesNum = ((pBufRead->len - 1) >> 5) + 1;
+	if(pBufRead->validFlag==YES)
 	{
 		// set the valid pointer
 		if(pReadseqBlockTmp->rowsNum + entriesNum > readSet->maxEntryNumReadseqBlock)
@@ -969,16 +1131,11 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
 			pReadseqTmpDoing = pReadseqBlockTmp->readseqArr;
 		}
 
-		// generate the readseq
-		if(generateReadseqInt(pReadseqTmpDoing, seq, seqLen, entriesNum)==FAILED)
-		{
-			printf("line=%d, In %s(), unknownBaseNum=%d, cannot generate the readseq integer sequence, error!\n", __LINE__, __func__, unknownBaseNum);
-			return FAILED;
-		}
+		if(pBufRead->pReadseqHashItem)
+			pReadseqHashItem = pBufRead->pReadseqHashItem;
+		else
+			pReadseqHashItem = getReadseqHashItemByHash(pBufRead->hashcode, pBufRead->pReadseqInt, pBufRead->len, entriesNum, readSet);
 
-		// get the hashcode and add the readseq
-		hashcode = readseqHashInt(pReadseqTmpDoing, seqLen, entriesNum);
-		pReadseqHashItem = getReadseqHashItemByHash(hashcode, pReadseqTmpDoing, seqLen, entriesNum, readSet);
 		if(pReadseqHashItem)
 		{ // set the readseq to the readseq blocks
 			pReadTmpDoing->readseqBlockID = pReadseqHashItem->readseqBlockID;
@@ -994,11 +1151,11 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
 			// add new item in readseq hash item block
 			pReadseqHashItemTmpDoing->readseqBlockID = pReadseqBlockTmp->blockID;
 			pReadseqHashItemTmpDoing->rowReadseqInBlock = pReadseqBlockTmp->rowsNum;
-			pReadseqHashItemTmpDoing->seqlen = seqLen;
-			pReadseqHashItemTmpDoing->nextHashItemBlockID = readSet->readseqHashtable[hashcode].hashItemBlockID;
-			pReadseqHashItemTmpDoing->nextItemRowHashItemBlock = readSet->readseqHashtable[hashcode].itemRowHashItemBlock;
-			readSet->readseqHashtable[hashcode].hashItemBlockID = pReadseqHashItemBlockTmp->blockID;
-			readSet->readseqHashtable[hashcode].itemRowHashItemBlock = pReadseqHashItemBlockTmp->itemNum;
+			pReadseqHashItemTmpDoing->seqlen = pBufRead->len;
+			pReadseqHashItemTmpDoing->nextHashItemBlockID = readSet->readseqHashtable[pBufRead->hashcode].hashItemBlockID;
+			pReadseqHashItemTmpDoing->nextItemRowHashItemBlock = readSet->readseqHashtable[pBufRead->hashcode].itemRowHashItemBlock;
+			readSet->readseqHashtable[pBufRead->hashcode].hashItemBlockID = pReadseqHashItemBlockTmp->blockID;
+			readSet->readseqHashtable[pBufRead->hashcode].itemRowHashItemBlock = pReadseqHashItemBlockTmp->itemNum;
 
 			readSet->totalItemNumReadseqHashItem ++;
 			pReadseqHashItemBlockTmp->itemNum ++;
@@ -1016,6 +1173,11 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
 			}
 
 			// readseq block operations
+			if(memcpy(pReadseqTmpDoing, pBufRead->pReadseqInt, entriesNum * sizeof(uint64_t))==NULL)
+			{
+				printf("line=%d, In %s(), cannot copy memory, Error!\n", __LINE__, __func__);
+				return FAILED;
+			}
 			pReadseqTmpDoing += entriesNum;
 			readSet->totalItemNumReadseq ++;
 			pReadseqBlockTmp->rowsNum += entriesNum;
@@ -1035,16 +1197,15 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
 		}
 	}
 
-
 	// add the read info
-	pReadTmpDoing->seqlen = seqLen;
-	pReadTmpDoing->nBaseNum = unknownBaseNum;
-	pReadTmpDoing->validFlag = validFlag;
+	pReadTmpDoing->seqlen = pBufRead->len;
+	pReadTmpDoing->nBaseNum = pBufRead->nBaseNum;
+	pReadTmpDoing->validFlag = pBufRead->validFlag;
 	pReadTmpDoing->successMapFlag = NO;
 	pReadTmpDoing->uniqueMapFlag = NO;
 	pReadBlockTmp->itemNum ++;
 	readSet->totalItemNumRead ++;
-	if(validFlag==YES)
+	if(pBufRead->validFlag==YES)
 		readSet->totalValidItemNumRead ++;
 	pReadTmpDoing++;
 
@@ -1068,32 +1229,33 @@ short addReadToReadset(char *seq, char *qual_data, int32_t seqLen, readSet_t *re
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short initReadSet(readSet_t **pReadSet)
+short initReadSet(readSet_t *pReadSet)
 {
 	//allocate readSet node
-	*pReadSet = (readSet_t *) calloc (1, sizeof(readSet_t));
-	if((*pReadSet)==NULL)
-	{
-		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
-		return FAILED;
-	}
+//	*pReadSet = (readSet_t *) calloc (1, sizeof(readSet_t));
+//	if((*pReadSet)==NULL)
+//	{
+//		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+//		return FAILED;
+//	}
+//	(*pReadSet)->setID = 1;
 
 	// initialize read blocks
-	if(initReadBlockInReadset(*pReadSet)==FAILED)
+	if(initReadBlockInReadset(pReadSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize read blocks, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// initialize readseq blocks
-	if(initReadseqBlockInReadset(*pReadSet)==FAILED)
+	if(initReadseqBlockInReadset(pReadSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize read blocks, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// initialize readseq hash table
-	if(initReadseqHashtableInReadset(*pReadSet)==FAILED)
+	if(initReadseqHashtableInReadset(pReadSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize readseq hash table, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -1386,45 +1548,58 @@ short addNewBlockReadseqHashItem(readSet_t *pReadSet)
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-void releaseReadset(readSet_t **pReadSet)
+void releaseReadsetArray(readSetArr_t **pReadSetArray)
 {
 	int32_t i;
 
-	if((*pReadSet)==NULL)
+	for(i=0; i<(*pReadSetArray)->readSetNum; i++)
+		releaseReadset((*pReadSetArray)->readSetArray+i);
+	free((*pReadSetArray)->readSetArray);
+	free(*pReadSetArray);
+	*pReadSetArray = NULL;
+}
+
+/**
+ * Release read set.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+void releaseReadset(readSet_t *pReadSet)
+{
+	int32_t i;
+
+	if(pReadSet==NULL)
 		return;
 
 	// release read blocks
-	if((*pReadSet)->readBlockArr)
+	if(pReadSet->readBlockArr)
 	{
-		for(i=0; i<(*pReadSet)->blocksNumRead; i++)
-			free((*pReadSet)->readBlockArr[i].readArr);
-		free((*pReadSet)->readBlockArr);
-		(*pReadSet)->readBlockArr = NULL;
+		for(i=0; i<pReadSet->blocksNumRead; i++)
+			free(pReadSet->readBlockArr[i].readArr);
+		free(pReadSet->readBlockArr);
+		pReadSet->readBlockArr = NULL;
 	}
 
 	// release readseq blocks
-	if((*pReadSet)->readseqBlockArr)
+	if(pReadSet->readseqBlockArr)
 	{
-		for(i=0; i<(*pReadSet)->blocksNumReadseq; i++)
-			free((*pReadSet)->readseqBlockArr[i].readseqArr);
-		free((*pReadSet)->readseqBlockArr);
-		(*pReadSet)->readseqBlockArr = NULL;
+		for(i=0; i<pReadSet->blocksNumReadseq; i++)
+			free(pReadSet->readseqBlockArr[i].readseqArr);
+		free(pReadSet->readseqBlockArr);
+		pReadSet->readseqBlockArr = NULL;
 	}
 
 	// release readseq hash blocks
-	releaseHashItemReadset(*pReadSet);
+	releaseHashItemReadset(pReadSet);
 
 	// release read blocks
-	if((*pReadSet)->readMatchInfoBlockArr)
+	if(pReadSet->readMatchInfoBlockArr)
 	{
-		for(i=0; i<(*pReadSet)->blocksNumReadMatchInfo; i++)
-			free((*pReadSet)->readMatchInfoBlockArr[i].readMatchInfoArr);
-		free((*pReadSet)->readMatchInfoBlockArr);
-		(*pReadSet)->readMatchInfoBlockArr = NULL;
+		for(i=0; i<pReadSet->blocksNumReadMatchInfo; i++)
+			free(pReadSet->readMatchInfoBlockArr[i].readMatchInfoArr);
+		free(pReadSet->readMatchInfoBlockArr);
+		pReadSet->readMatchInfoBlockArr = NULL;
 	}
-
-	free(*pReadSet);
-	*pReadSet = NULL;
 }
 
 /**
@@ -1532,7 +1707,7 @@ short generateReadseqInt(uint64_t *seqInt, char *seq, int32_t seqLen, int32_t en
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-inline readseqHashItem_t *getReadseqHashItemByHash(uint64_t hashvalue, uint64_t *readseqInt, int32_t seqLen, int32_t entriesNum, readSet_t *readSet)
+readseqHashItem_t *getReadseqHashItemByHash(uint64_t hashvalue, uint64_t *readseqInt, int32_t seqLen, int32_t entriesNum, readSet_t *readSet)
 {
 	readseqHashItem_t *pReadseqHashItem;
 	readseqHashBucket_t *pHashBucket;
@@ -1846,3 +2021,20 @@ short computeMaxReadLenInReadset(readSet_t *readSet)
 	return SUCCESSFUL;
 }
 
+/**
+ * Get the read by readID from readSet.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getReadByReadID(read_t **read, int64_t readID, readSet_t *readSet)
+{
+	int32_t readBlockID, rowNumInReadBlock, maxItemNumPerReadBlock;
+
+	maxItemNumPerReadBlock = readSet->maxItemNumPerReadBlock;
+
+	readBlockID = (readID - 1) / maxItemNumPerReadBlock;
+	rowNumInReadBlock = (readID - 1) % maxItemNumPerReadBlock;
+	*read = readSet->readBlockArr[readBlockID].readArr + rowNumInReadBlock;
+
+	return SUCCESSFUL;
+}

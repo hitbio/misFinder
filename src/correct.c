@@ -28,7 +28,7 @@ short correctMisassQueries(queryMatchInfo_t *queryMatchInfoSet)
 		if(queryArray[i].misassFlag==TRUE_MISASS)
 		{
 			// ########################### Debug information ##############################
-			//if(queryArray[i].queryID==7 || strcmp(queryArray[i].queryTitle, "ctg7180000002354")==0)
+			//if(queryArray[i].queryID==71 || strcmp(queryArray[i].queryTitle, "ctg7180000002451")==0)
 			//{
 			//	printf("###### queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
 			//}
@@ -44,15 +44,15 @@ short correctMisassQueries(queryMatchInfo_t *queryMatchInfoSet)
 			// ############# Debug information ###############
 			//outputNewSeqInfo(queryArray+i);
 			// ############# Debug information ###############
-
-			processedNum ++;
-			if(processedNum%100==0)
-				printf("Queries processed: %d\n", processedNum);
 		}
+
+		processedNum ++;
+//		if(processedNum%100==0)
+//			printf("Queries processed: %d\n", processedNum);
 	}
 
-	if(processedNum%100!=0)
-		printf("Queries processed: %d\n", processedNum);
+//	if(processedNum%100!=0)
+//		printf("Queries processed: %d\n", processedNum);
 
 	return SUCCESSFUL;
 }
@@ -64,9 +64,28 @@ short correctMisassQueries(queryMatchInfo_t *queryMatchInfoSet)
  */
 short correctSingleMisassQuery(query_t *queryItem, subject_t *subjectArray)
 {
-	int32_t newSeqLen;
+	int32_t newSeqLen, newSeqFlag;
 	char *newSeq;
 	misInfo_t *misInfo, *misInfoTmp, *startMisInfo, *endMisInfo, *processedMisInfo;
+
+	newSeqFlag = NO;
+	misInfo = queryItem->misInfoList;
+	while(misInfo)
+	{
+		if(misInfo->misassFlag==TRUE_MISASS && misInfo->misType==QUERY_MISJOIN_KIND)
+		{
+			newSeqFlag = YES;
+			break;
+		}
+		misInfo = misInfo->next;
+	}
+
+	if(newSeqFlag==NO)
+	{
+		queryItem->newQuerySeqList = NULL;
+		queryItem->newQuerySeqNum = 0;
+		return SUCCESSFUL;
+	}
 
 	processedMisInfo = NULL;
 	misInfo = queryItem->misInfoList;
@@ -87,21 +106,21 @@ short correctSingleMisassQuery(query_t *queryItem, subject_t *subjectArray)
 		}
 
 		// compute new sequence length
-		if(computeNewSeqLen(&newSeqLen, startMisInfo, endMisInfo, queryItem)==FAILED)
+		if(computeNewSeqLen(&newSeqLen, startMisInfo, endMisInfo, processedMisInfo, queryItem)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute new sequence length, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// generate new sequence node
-		if(generateNewSeqNode(queryItem, &newSeq, newSeqLen, startMisInfo, endMisInfo)==FAILED)
+		if(generateNewSeqNode(queryItem, &newSeq, newSeqLen, startMisInfo, endMisInfo, processedMisInfo)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot generate the new sequence nodes, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
 
 		// fill the bases
-		if(fillNewBases(queryItem, newSeq, newSeqLen, startMisInfo, endMisInfo, subjectArray)==FAILED)
+		if(fillNewBases(queryItem, newSeq, newSeqLen, startMisInfo, endMisInfo, processedMisInfo, subjectArray)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot fill the new sequence, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -115,15 +134,13 @@ short correctSingleMisassQuery(query_t *queryItem, subject_t *subjectArray)
 }
 
 /**
- * Compute new sequence length.
+ * Get start and end query positions.
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo, query_t *queryItem)
+short getStartEndQueryPosMisCor(int32_t *startQueryPos, int32_t *endQneryPos, misInfo_t *startMisInfo, misInfo_t *endMisInfo, misInfo_t *processedMisInfo, query_t *queryItem)
 {
-	int32_t startQPos, endQPos, nullFlag, leftSegRow, rightSegRow, globalSegNum, newLen, insLen, rmLen, newStartQPos, newStartSPos, distSubject, distQuery;
-	misInfo_t *misInfo;
-	queryIndel_t *queryIndel;
+	int32_t startQPos, endQPos, nullFlag, leftSegRow, rightSegRow, globalSegNum;
 	globalValidSeg_t *globalSegArray;
 
 	globalSegArray = queryItem->globalValidSegArray;
@@ -134,7 +151,13 @@ short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *e
 		if(startMisInfo==endMisInfo)
 			startQPos = 1;
 		else
-			startQPos = startMisInfo->queryMargin->leftMargin;
+		{
+			if(startMisInfo==processedMisInfo)
+				startQPos = startMisInfo->queryMargin->leftMargin;
+			else
+				//startQPos = globalSegArray[0].startQueryPos;
+				startQPos = 1;
+		}
 	}else
 	{
 		leftSegRow = startMisInfo->leftSegRow;
@@ -142,11 +165,18 @@ short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *e
 		if(leftSegRow==-1)
 		{
 			if(rightSegRow>=0 && startMisInfo->misassFlag==TRUE_MISASS)
-				startQPos = globalSegArray[rightSegRow].startQueryPos;
+				//startQPos = globalSegArray[rightSegRow].startQueryPos;
+				startQPos = 1;
 			else
 				startQPos = 1;
 		}else
-			startQPos = globalSegArray[leftSegRow].startQueryPos;
+		{
+			if(startMisInfo==queryItem->misInfoList)
+				//startQPos = globalSegArray[0].startQueryPos;
+				startQPos = 1;
+			else
+				startQPos = globalSegArray[leftSegRow].startQueryPos;
+		}
 	}
 
 	if(endMisInfo==NULL)
@@ -169,7 +199,8 @@ short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *e
 		if(rightSegRow==-1)
 		{
 			if(leftSegRow>=0 && endMisInfo->misassFlag==TRUE_MISASS)
-				endQPos = globalSegArray[leftSegRow].endQueryPos;
+				//endQPos = globalSegArray[leftSegRow].endQueryPos;
+				endQPos = queryItem->queryLen;
 			else
 				endQPos = queryItem->queryLen;
 		}else
@@ -177,11 +208,36 @@ short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *e
 			if(endMisInfo->next)
 				endQPos = globalSegArray[rightSegRow].endQueryPos;
 			else
-				endQPos = globalSegArray[globalSegNum - 1].endQueryPos;
+				//endQPos = globalSegArray[globalSegNum-1].endQueryPos;
+				endQPos = queryItem->queryLen;
 		}
 	}
 
+	*startQueryPos = startQPos;
+	*endQneryPos = endQPos;
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Compute new sequence length.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo, misInfo_t *processedMisInfo, query_t *queryItem)
+{
+	int32_t startQPos, endQPos, nullFlag, leftSegRow, rightSegRow, globalSegNum, newLen, insLen, rmLen, newStartQPos, newStartSPos, distSubject, distQuery;
+	misInfo_t *misInfo;
+	queryIndel_t *queryIndel;
+	globalValidSeg_t *globalSegArray;
+
+	if(getStartEndQueryPosMisCor(&startQPos, &endQPos, startMisInfo, endMisInfo, processedMisInfo, queryItem)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot get the start and end position for new query sequence, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
 	newLen = endQPos - startQPos + 1;
+
 /*
 	misInfo = startMisInfo;
 	while(misInfo)
@@ -361,14 +417,11 @@ short computeNewSeqLen(int32_t *newSeqLen, misInfo_t *startMisInfo, misInfo_t *e
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short generateNewSeqNode(query_t *queryItem, char **newSeq, int32_t newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo)
+short generateNewSeqNode(query_t *queryItem, char **newSeq, int32_t newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo, misInfo_t *processedMisInfo)
 {
 	querySeq_t *querySeqNode;
 	globalValidSeg_t *globalSegArray;
 	int32_t leftSegRow, rightSegRow, globalSegNum, nullFlag;
-
-	globalSegArray = queryItem->globalValidSegArray;
-	globalSegNum = queryItem->globalValidSegNum;
 
 	*newSeq = (char *) calloc (newSeqLen+1, sizeof(char));
 	if((*newSeq)==NULL)
@@ -388,57 +441,10 @@ short generateNewSeqNode(query_t *queryItem, char **newSeq, int32_t newSeqLen, m
 	querySeqNode->next = NULL;
 
 	// set the start query position of new querySeq
-	if(startMisInfo->misType==QUERY_MISJOIN_KIND)
+	if(getStartEndQueryPosMisCor(&querySeqNode->startQueryPos, &querySeqNode->endQueryPos, startMisInfo, endMisInfo, processedMisInfo, queryItem)==FAILED)
 	{
-		if(startMisInfo==endMisInfo)
-			querySeqNode->startQueryPos = 1;
-		else
-			querySeqNode->startQueryPos = startMisInfo->queryMargin->leftMargin;
-	}else
-	{
-		leftSegRow = startMisInfo->leftSegRow;
-		rightSegRow = startMisInfo->rightSegRow;
-		if(leftSegRow==-1)
-		{
-			if(rightSegRow>=0 && startMisInfo->misassFlag==TRUE_MISASS)
-				querySeqNode->startQueryPos = globalSegArray[rightSegRow].startQueryPos;
-			else
-				querySeqNode->startQueryPos = 1;
-		}else
-			querySeqNode->startQueryPos = globalSegArray[leftSegRow].startQueryPos;
-	}
-
-	// set the end query position of new querySeq
-	if(endMisInfo==NULL)
-	{
-		endMisInfo = queryItem->tailMisInfo;
-		nullFlag = YES;
-	}else
-		nullFlag = NO;
-
-	if(endMisInfo->misType==QUERY_MISJOIN_KIND)
-	{
-		if(nullFlag==NO)
-			querySeqNode->endQueryPos = endMisInfo->queryMargin->rightMargin;
-		else
-			querySeqNode->endQueryPos = queryItem->queryLen;
-	}else
-	{
-		leftSegRow = endMisInfo->leftSegRow;
-		rightSegRow = endMisInfo->rightSegRow;
-		if(rightSegRow==-1)
-		{
-			if(leftSegRow>=0 && endMisInfo->misassFlag==TRUE_MISASS)
-				querySeqNode->endQueryPos = globalSegArray[leftSegRow].endQueryPos;
-			else
-				querySeqNode->endQueryPos = queryItem->queryLen;
-		}else
-		{
-			if(endMisInfo->next)
-				querySeqNode->endQueryPos = globalSegArray[rightSegRow].endQueryPos;
-			else
-				querySeqNode->endQueryPos = globalSegArray[globalSegNum-1].endQueryPos;
-		}
+		printf("line=%d, In %s(), cannot get the start and end position for new query sequence, error!\n", __LINE__, __func__);
+		return FAILED;
 	}
 
 	// append the node
@@ -461,7 +467,7 @@ short generateNewSeqNode(query_t *queryItem, char **newSeq, int32_t newSeqLen, m
  * 	@return:
  * 		if succeed, return SUCCESSFUL; otherwise, return FAILED.
  */
-short fillNewBases(query_t *queryItem, char *newSeq, int32_t newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo, subject_t *subjectArray)
+short fillNewBases(query_t *queryItem, char *newSeq, int32_t newSeqLen, misInfo_t *startMisInfo, misInfo_t *endMisInfo, misInfo_t *processedMisInfo, subject_t *subjectArray)
 {
 	int32_t startQPos, endQPos, nullFlag, leftSegRow, rightSegRow, newLen, preQueryPos, newStartSPos;
 	int32_t subjectID, globalSegNum, queryLen, subLen;
@@ -473,59 +479,12 @@ short fillNewBases(query_t *queryItem, char *newSeq, int32_t newSeqLen, misInfo_
 
 	querySeq = queryItem->querySeq;
 	queryLen = queryItem->queryLen;
-	globalSegArray = queryItem->globalValidSegArray;
-	globalSegNum = queryItem->globalValidSegNum;
 
-	if(startMisInfo->misType==QUERY_MISJOIN_KIND)
+	// set the start query position of new querySeq
+	if(getStartEndQueryPosMisCor(&startQPos, &endQPos, startMisInfo, endMisInfo, processedMisInfo, queryItem)==FAILED)
 	{
-		if(startMisInfo==endMisInfo)
-			startQPos = 1;
-		else
-			startQPos = startMisInfo->queryMargin->leftMargin;
-	}else
-	{
-		leftSegRow = startMisInfo->leftSegRow;
-		rightSegRow = startMisInfo->rightSegRow;
-		if(leftSegRow==-1)
-		{
-			if(rightSegRow>=0 && startMisInfo->misassFlag==TRUE_MISASS)
-				startQPos = globalSegArray[rightSegRow].startQueryPos;
-			else
-				startQPos = 1;
-		}else
-			startQPos = globalSegArray[leftSegRow].startQueryPos;
-	}
-
-	if(endMisInfo==NULL)
-	{
-		endMisInfo = queryItem->tailMisInfo;
-		nullFlag = YES;
-	}else
-		nullFlag = NO;
-
-	if(endMisInfo->misType==QUERY_MISJOIN_KIND)
-	{
-		if(nullFlag==NO)
-			endQPos = endMisInfo->queryMargin->rightMargin;
-		else
-			endQPos = queryItem->queryLen;
-	}else
-	{
-		leftSegRow = endMisInfo->leftSegRow;
-		rightSegRow = endMisInfo->rightSegRow;
-		if(rightSegRow==-1)
-		{
-			if(leftSegRow>=0 && endMisInfo->misassFlag==TRUE_MISASS)
-				endQPos = globalSegArray[leftSegRow].endQueryPos;
-			else
-				endQPos = queryItem->queryLen;
-		}else
-		{
-			if(endMisInfo->next)
-				endQPos = globalSegArray[rightSegRow].endQueryPos;
-			else
-				endQPos = globalSegArray[globalSegNum-1].endQueryPos;
-		}
+		printf("line=%d, In %s(), cannot get the start and end position for new query sequence, error!\n", __LINE__, __func__);
+		return FAILED;
 	}
 
 	newLen = endQPos - startQPos + 1;

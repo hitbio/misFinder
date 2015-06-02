@@ -16,22 +16,25 @@
  */
 short convertMatchInfo(char *queryMatchInfoFile, char *parseResultFile)
 {
+	tmpQuery_t *tmpQueryArray;
+	int64_t itemNumTmpQueryArray;
+	queryMatchInfo_t *queryMatchInfoSet;
 
-	if(initMemConvertMatchInfo(parseResultFile)==FAILED)
+	if(initMemConvertMatchInfo(&queryMatchInfoSet, &tmpQueryArray, &itemNumTmpQueryArray, parseResultFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the memory for converting the match information, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// fill the data for tmpQuery array
-	if(fillDataTmpQueryArray(tmpQueryArr, itemNumTmpQueryArr, queryMatchInfoSet, parseResultFile)==FAILED)
+	if(fillDataTmpQueryArray(tmpQueryArray, itemNumTmpQueryArray, queryMatchInfoSet, parseResultFile)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the data for tmpQuery array, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// converting
-	if(convertQueryMatchInfo(queryMatchInfoSet, tmpQueryArr, itemNumTmpQueryArr)==FAILED)
+	if(convertQueryMatchInfo(queryMatchInfoSet, tmpQueryArray, itemNumTmpQueryArray)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot convert the tmpQuery array to query match information, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -44,7 +47,7 @@ short convertMatchInfo(char *queryMatchInfoFile, char *parseResultFile)
 		return FAILED;
 	}
 
-	freeMemConvertMatchInfo();
+	freeMemConvertMatchInfo(&queryMatchInfoSet, &tmpQueryArray, &itemNumTmpQueryArray);
 
 	return SUCCESSFUL;
 }
@@ -54,51 +57,51 @@ short convertMatchInfo(char *queryMatchInfoFile, char *parseResultFile)
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initMemConvertMatchInfo(char *parseResultFile)
+short initMemConvertMatchInfo(queryMatchInfo_t **queryMatchInfoSet, tmpQuery_t **tmpQueryArray, int64_t *itemNumTmpQueryArray, char *parseResultFile)
 {
-	queryMatchInfoSet = (queryMatchInfo_t *) calloc (1, sizeof(queryMatchInfo_t));
-	if(queryMatchInfoSet==NULL)
+	*queryMatchInfoSet = (queryMatchInfo_t *) calloc (1, sizeof(queryMatchInfo_t));
+	if((*queryMatchInfoSet)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
 	// get the numbers for converting
-	if(getItemNums(&(queryMatchInfoSet->itemNumSubjectArray), &(queryMatchInfoSet->itemNumQueryArray), &itemNumTmpQueryArr, &(queryMatchInfoSet->itemNumMatchItemArray), parseResultFile)==FAILED)
+	if(getItemNums(&((*queryMatchInfoSet)->itemNumSubjectArray), &((*queryMatchInfoSet)->itemNumQueryArray), itemNumTmpQueryArray, &((*queryMatchInfoSet)->itemNumMatchItemArray), parseResultFile)==FAILED)
 	{
 		printf("In %s(), cannot get the arrayNums from the parseResultFile, error!\n", __func__);
 		return 1;
 	}
 
 	// allocate the memory for converting
-	queryMatchInfoSet->queryArray = (query_t *) calloc (queryMatchInfoSet->itemNumQueryArray, sizeof(query_t));
-	if(queryMatchInfoSet->queryArray==NULL)
+	(*queryMatchInfoSet)->queryArray = (query_t *) calloc ((*queryMatchInfoSet)->itemNumQueryArray, sizeof(query_t));
+	if((*queryMatchInfoSet)->queryArray==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	queryMatchInfoSet->subjectArray = (subject_t *) calloc (queryMatchInfoSet->itemNumSubjectArray, sizeof(subject_t));
-	if(queryMatchInfoSet->subjectArray==NULL)
+	(*queryMatchInfoSet)->subjectArray = (subject_t *) calloc ((*queryMatchInfoSet)->itemNumSubjectArray, sizeof(subject_t));
+	if((*queryMatchInfoSet)->subjectArray==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	queryMatchInfoSet->matchItemArray = (matchItem_t *) calloc (queryMatchInfoSet->itemNumMatchItemArray, sizeof(matchItem_t));
-	if(queryMatchInfoSet->matchItemArray==NULL)
+	(*queryMatchInfoSet)->matchItemArray = (matchItem_t *) calloc ((*queryMatchInfoSet)->itemNumMatchItemArray, sizeof(matchItem_t));
+	if((*queryMatchInfoSet)->matchItemArray==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	queryMatchInfoSet->potentMisassNum = 0;
-	queryMatchInfoSet->trueMisassNum = 0;
-	queryMatchInfoSet->SVNum = 0;
+	(*queryMatchInfoSet)->potentMisassNum = 0;
+	(*queryMatchInfoSet)->trueMisassNum = 0;
+	(*queryMatchInfoSet)->SVNum = 0;
 
 
-	tmpQueryArr = (tmpQuery_t *) calloc (itemNumTmpQueryArr, sizeof(tmpQuery_t));
-	if(tmpQueryArr==NULL)
+	*tmpQueryArray = (tmpQuery_t *) calloc (*itemNumTmpQueryArray, sizeof(tmpQuery_t));
+	if((*tmpQueryArray)==NULL)
 	{
 		printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -110,17 +113,17 @@ short initMemConvertMatchInfo(char *parseResultFile)
 /**
  * Free the memory of converting match information.
  */
-void freeMemConvertMatchInfo()
+void freeMemConvertMatchInfo(queryMatchInfo_t **queryMatchInfoSet, tmpQuery_t **tmpQueryArray, int64_t *itemNumTmpQueryArray)
 {
 	int64_t i;
 
-	for(i=0; i<itemNumTmpQueryArr; i++) free(tmpQueryArr[i].queryTitle);
-	free(tmpQueryArr);
-	tmpQueryArr = NULL;
+	for(i=0; i<*itemNumTmpQueryArray; i++) free((*tmpQueryArray)[i].queryTitle);
+	free(*tmpQueryArray);
+	*tmpQueryArray = NULL;
 
-	itemNumTmpQueryArr = 0;
+	*itemNumTmpQueryArray = 0;
 
-	releaseQueryMatchInfo(&queryMatchInfoSet);
+	releaseQueryMatchInfo(queryMatchInfoSet);
 }
 
 /**
@@ -154,8 +157,8 @@ short getItemNums(int64_t *itemNumSubjectArray, int64_t *itemNumQueryArray, int6
  */
 short getSubjectNum(int64_t *itemNumSubjectArray, char *parseResultFile)
 {
-	int len, fileStatus, validFirstHeadFlag;
-	char line[LINE_CHAR_MAX+1], *pch, tmpQueryTitle[LINE_CHAR_MAX+1] ;
+	int32_t len, fileStatus, validFirstHeadFlag;
+	char line[LINE_CHAR_MAX+1], *pch, tmpQueryTitle[LINE_CHAR_MAX+1];
 	FILE *fpParseResult;
 
 
@@ -735,10 +738,21 @@ void releaseQueryMatchInfo(queryMatchInfo_t **queryMatchInfoSet)
 			(*queryMatchInfoSet)->queryArray[i].querySeq = NULL;
 		}
 
-		if((*queryMatchInfoSet)->queryArray[i].queryReadArray)
+		// queryReadSet array
+		if((*queryMatchInfoSet)->queryArray[i].queryReadSetNum>0)
 		{
-			free((*queryMatchInfoSet)->queryArray[i].queryReadArray);
-			(*queryMatchInfoSet)->queryArray[i].queryReadArray = NULL;
+			for(j=0; j<(*queryMatchInfoSet)->queryArray[i].queryReadSetNum; j++)
+			{
+				if((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum>0)
+				{
+					free((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadArray);
+					(*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadArray = NULL;
+					(*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum = 0;
+				}
+			}
+			free((*queryMatchInfoSet)->queryArray[i].queryReadSetArray);
+			(*queryMatchInfoSet)->queryArray[i].queryReadSetArray = NULL;
+			(*queryMatchInfoSet)->queryArray[i].queryReadSetNum = 0;
 		}
 
 		if((*queryMatchInfoSet)->queryArray[i].querySubjectNum>0)
@@ -815,7 +829,7 @@ void releaseQueryMatchInfo(queryMatchInfo_t **queryMatchInfoSet)
  *  	(1) queryMatchInfo node;
  *  	(2) subjectArray and their titleArray;
  *  	(3) queryArray and their titleArray, querySubjectArray and the validSegArray;
- *  	(4) queryReadArray;
+ *  	(4) queryReadSetArray;
  *  	(5) globalSegArray;
  *  	(6) matchItemArray;
  *  @return:
@@ -825,8 +839,6 @@ short saveQueryMatchInfoToFile(char *queryMatchInfoFile, queryMatchInfo_t *query
 {
 	FILE *fpQueryMatchInfo;
 	int64_t i, j;
-	queryMargin_t *queryMargin;
-	queryIndel_t * queryIndel;
 
 	fpQueryMatchInfo = fopen(queryMatchInfoFile, "wb");
 	if(fpQueryMatchInfo==NULL)
@@ -894,13 +906,25 @@ short saveQueryMatchInfoToFile(char *queryMatchInfoFile, queryMatchInfo_t *query
 			}
 		}
 
-		// queryRead array
-		if(queryMatchInfoSet->queryArray[i].queryReadNum>0)
+		// queryReadSet array
+		if(queryMatchInfoSet->queryArray[i].queryReadSetNum>0)
 		{
-			if(fwrite(queryMatchInfoSet->queryArray[i].queryReadArray, sizeof(queryRead_t), queryMatchInfoSet->queryArray[i].queryReadNum, fpQueryMatchInfo)!=queryMatchInfoSet->queryArray[i].queryReadNum)
+			if(fwrite(queryMatchInfoSet->queryArray[i].queryReadSetArray, sizeof(queryReadSet_t), queryMatchInfoSet->queryArray[i].queryReadSetNum, fpQueryMatchInfo)!=queryMatchInfoSet->queryArray[i].queryReadSetNum)
 			{
 				printf("line=%d, In %s(), cannot write information to  binary file, error!\n", __LINE__, __func__);
 				return FAILED;
+			}
+
+			for(j=0; j<queryMatchInfoSet->queryArray[i].queryReadSetNum; j++)
+			{
+				if(queryMatchInfoSet->queryArray[i].queryReadSetArray[j].queryReadNum>0)
+				{
+					if(fwrite(queryMatchInfoSet->queryArray[i].queryReadSetArray[j].queryReadArray, sizeof(queryRead_t), queryMatchInfoSet->queryArray[i].queryReadSetArray[j].queryReadNum, fpQueryMatchInfo)!=queryMatchInfoSet->queryArray[i].queryReadSetArray[j].queryReadNum)
+					{
+						printf("line=%d, In %s(), cannot write information to  binary file, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+				}
 			}
 		}
 
@@ -934,7 +958,7 @@ short saveQueryMatchInfoToFile(char *queryMatchInfoFile, queryMatchInfo_t *query
  *  	(1) queryMatchInfo node;
  *  	(2) subjectArray and their titleArray;
  *  	(3) queryArray and their titleArray, querySubjectArray and the validSegArray;
- *  	(4) queryReadArray;
+ *  	(4) queryReadSetArray;
  *  	(5) globalSegArray;
  *  	(6) matchItemArray.
  *  @return:
@@ -1070,19 +1094,37 @@ short loadQueryMatchInfoFromFile(queryMatchInfo_t **queryMatchInfoSet, char *que
 			}
 		}
 
-		// queryReadArray
-		if((*queryMatchInfoSet)->queryArray[i].queryReadNum>0)
+		// queryReadSetArray
+		if((*queryMatchInfoSet)->queryArray[i].queryReadSetNum>0)
 		{
-			(*queryMatchInfoSet)->queryArray[i].queryReadArray = (queryRead_t *) calloc ((*queryMatchInfoSet)->queryArray[i].queryReadNum, sizeof(queryRead_t));
-			if((*queryMatchInfoSet)->queryArray[i].queryReadArray==NULL)
+			(*queryMatchInfoSet)->queryArray[i].queryReadSetArray = (queryReadSet_t *) calloc ((*queryMatchInfoSet)->queryArray[i].queryReadSetNum, sizeof(queryReadSet_t));
+			if((*queryMatchInfoSet)->queryArray[i].queryReadSetArray==NULL)
 			{
 				printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-			if(fread((*queryMatchInfoSet)->queryArray[i].queryReadArray, sizeof(queryRead_t), (*queryMatchInfoSet)->queryArray[i].queryReadNum, fpQueryMatchInfo)!=(*queryMatchInfoSet)->queryArray[i].queryReadNum)
+			if(fread((*queryMatchInfoSet)->queryArray[i].queryReadSetArray, sizeof(queryReadSet_t), (*queryMatchInfoSet)->queryArray[i].queryReadSetNum, fpQueryMatchInfo)!=(*queryMatchInfoSet)->queryArray[i].queryReadSetNum)
 			{
 				printf("line=%d, In %s(), cannot read information to  binary file, error!\n", __LINE__, __func__);
 				return FAILED;
+			}
+
+			for(j=0; j<(*queryMatchInfoSet)->queryArray[i].queryReadSetNum; j++)
+			{
+				if((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum>0)
+				{
+					(*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadArray = (queryRead_t *) calloc ((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum, sizeof(queryRead_t));
+					if((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadArray==NULL)
+					{
+						printf("line=%d, In %s(), cannot allocate memory, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+					if(fread((*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadArray, sizeof(queryRead_t), (*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum, fpQueryMatchInfo)!=(*queryMatchInfoSet)->queryArray[i].queryReadSetArray[j].queryReadNum)
+					{
+						printf("line=%d, In %s(), cannot read information to  binary file, error!\n", __LINE__, __func__);
+						return FAILED;
+					}
+				}
 			}
 		}
 

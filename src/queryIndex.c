@@ -293,22 +293,19 @@ short countQueryKmerOccs(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatchI
 	queryArray = queryMatchInfoSet->queryArray;
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
-		//if(queryArray[i].misassFlag==POTENTIAL_MISASS || queryArray[i].queryID==queryMatchInfoSet->maxQueryID || queryArray[i].queryID==queryMatchInfoSet->secQueryID)
+		querySeq = queryArray[i].querySeq;
+		queryLen = queryArray[i].queryLen;
+
+		// get start and end query positions
+		startBasePos = endBasePos = -1;
+		if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
 		{
-			querySeq = queryArray[i].querySeq;
-			queryLen = queryArray[i].queryLen;
+			printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
 
-			// get start and end query positions
-			if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
-			{
-				printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-			if(startBasePos<0 || endBasePos<0)
-			{
-				continue;
-			}
-
+		while(startBasePos>=0 && endBasePos>=0)
+		{
 			pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
 			// generate the first kmerseqInt
 			if(generateReadseqInt(pKmerSeqIntDoing, querySeq+startBasePos, kmerSize, entriesPerKmer)==FAILED)
@@ -318,7 +315,7 @@ short countQueryKmerOccs(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatchI
 			}
 			pKmerSeqIntDone = pKmerSeqIntDoing;
 
-			// count the first scafKmer
+			// count the kmer
 			hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
 			if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
 			{
@@ -326,79 +323,122 @@ short countQueryKmerOccs(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatchI
 				return FAILED;
 			}
 
-			// process other scafKmers
-			for(basePos=startBasePos+kmerSize; basePos<=endBasePos; basePos++)
+			// update startBasePos
+			startBasePos += kmerSize;
+			if(startBasePos>endBasePos)
 			{
-				validFlag = YES;
-				switch(querySeq[basePos])
+				// recalculate the start and end query positions
+				if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
 				{
-					case 'A':
-					case 'a': baseInt = 0; break;
-					case 'C':
-					case 'c': baseInt = 1; break;
-					case 'G':
-					case 'g': baseInt = 2; break;
-					case 'T':
-					case 't': baseInt = 3; break;
-					default: validFlag = NO;
+					printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+			}else if(startBasePos+kmerSize-1>endBasePos)
+				startBasePos = endBasePos - kmerSize + 1;
+		}
+
+/*
+		// get start and end query positions
+		if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		if(startBasePos<0 || endBasePos<0)
+		{
+			continue;
+		}
+
+		pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
+		// generate the first kmerseqInt
+		if(generateReadseqInt(pKmerSeqIntDoing, querySeq+startBasePos, kmerSize, entriesPerKmer)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		pKmerSeqIntDone = pKmerSeqIntDoing;
+
+		// count the first scafKmer
+		hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+		if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		// process other scafKmers
+		for(basePos=startBasePos+kmerSize; basePos<=endBasePos; basePos++)
+		{
+			validFlag = YES;
+			switch(querySeq[basePos])
+			{
+				case 'A':
+				case 'a': baseInt = 0; break;
+				case 'C':
+				case 'c': baseInt = 1; break;
+				case 'G':
+				case 'g': baseInt = 2; break;
+				case 'T':
+				case 't': baseInt = 3; break;
+				default: validFlag = NO;
+			}
+
+			if(validFlag==YES)
+			{
+				pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
+
+				// generate the kmer integer sequence
+				if(entriesPerKmer>=2)
+				{
+					for(j=0; j<entriesPerKmer-2; j++)
+					{
+						pKmerSeqIntDoing[j] = (pKmerSeqIntDone[j] << 2) | (pKmerSeqIntDone[j+1] >> 62);
+					}
+					pKmerSeqIntDoing[entriesPerKmer-2] = (pKmerSeqIntDone[entriesPerKmer-2] << 2) | (pKmerSeqIntDone[entriesPerKmer-1] >> (2*lastEntryBaseNum-2));
+				}
+				pKmerSeqIntDoing[entriesPerKmer-1] = ((pKmerSeqIntDone[entriesPerKmer-1] << 2) | baseInt) & lastEntryMask;
+
+				pKmerSeqIntDone = pKmerSeqIntDoing;
+
+				hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+				if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+			}else
+			{
+				// get next valid query base position
+				if(getNextValidQueryBasePos(&newBasePos, querySeq, basePos, endBasePos, kmerSize)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot get next valid query base position, error!\n", __LINE__, __func__);
+					return FAILED;
 				}
 
-				if(validFlag==YES)
+				if(newBasePos<0)
+					break;
+
+				pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
+				// generate the first kmerseqInt
+				if(generateReadseqInt(pKmerSeqIntDoing, querySeq+newBasePos, kmerSize, entriesPerKmer)==FAILED)
 				{
-					pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
-
-					// generate the kmer integer sequence
-					if(entriesPerKmer>=2)
-					{
-						for(j=0; j<entriesPerKmer-2; j++)
-						{
-							pKmerSeqIntDoing[j] = (pKmerSeqIntDone[j] << 2) | (pKmerSeqIntDone[j+1] >> 62);
-						}
-						pKmerSeqIntDoing[entriesPerKmer-2] = (pKmerSeqIntDone[entriesPerKmer-2] << 2) | (pKmerSeqIntDone[entriesPerKmer-1] >> (2*lastEntryBaseNum-2));
-					}
-					pKmerSeqIntDoing[entriesPerKmer-1] = ((pKmerSeqIntDone[entriesPerKmer-1] << 2) | baseInt) & lastEntryMask;
-
-					pKmerSeqIntDone = pKmerSeqIntDoing;
-
-					hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
-					if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-				}else
-				{
-					// get next valid query base position
-					if(getNextValidQueryBasePos(&newBasePos, querySeq, basePos, endBasePos, kmerSize)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot get next valid query base position, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-
-					if(newBasePos<0)
-						break;
-
-					pKmerSeqIntDoing = queryIndex->pKmerSeqAdding;
-					// generate the first kmerseqInt
-					if(generateReadseqInt(pKmerSeqIntDoing, querySeq+newBasePos, kmerSize, entriesPerKmer)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-					pKmerSeqIntDone = pKmerSeqIntDoing;
-
-					// count the first scafKmer
-					hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
-					if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-
-					basePos += kmerSize - 1;
+					printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
+					return FAILED;
 				}
+				pKmerSeqIntDone = pKmerSeqIntDoing;
+
+				// count the first scafKmer
+				hashcode = kmerhashInt(pKmerSeqIntDoing, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+				if(countQueryKmer(hashcode, pKmerSeqIntDoing, queryIndex)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				basePos += kmerSize - 1;
 			}
 		}
+*/
 	}
 
 	// the last k-mer block is empty, remove it
@@ -421,17 +461,90 @@ short countQueryKmerOccs(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatchI
 }
 
 /**
- * Get the start and end query positions.
+ * Get the start and end query positions (start from 0).
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
 short getStartEndQueryPos(int32_t *startBasePos, int32_t *endBasePos, char *querySeq, int32_t queryLen, int32_t kmerSize)
 {
+
+	int32_t i, j, baseNum, startRow, endRow, validStartRow, validBaseFlag;
+
+	// compute the start base position
+	if((*endBasePos)==-1)
+		startRow = 0;
+	else
+		startRow = (*endBasePos) + 1;
+
+	baseNum = 0;
+	validStartRow = NO;
+	for(i=startRow; i<=queryLen-kmerSize; i++)
+	{
+		if(checkValidQueryBase(&validBaseFlag, querySeq[i])==FAILED)
+		{
+			printf("line=%d, In %s(), cannot check the valid query base, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		if(validBaseFlag==YES)
+		{
+			if(baseNum==0)
+				startRow = i;
+
+			baseNum ++;
+			if(baseNum>=kmerSize)
+			{
+				validStartRow = YES;
+				break;
+			}
+		}else
+		{
+			baseNum = 0;
+		}
+	}
+
+	if(validStartRow==YES)
+		*startBasePos = startRow;
+	else
+		*startBasePos = *endBasePos = -1;
+
+	// compute the end base position
+	if((*startBasePos)>=0)
+	{
+		endRow = -1;
+		startRow = (*startBasePos) + kmerSize;
+		for(i=startRow; i<queryLen; i++)
+		{
+			if(checkValidQueryBase(&validBaseFlag, querySeq[i])==FAILED)
+			{
+				printf("line=%d, In %s(), cannot check the valid query base, error!\n", __LINE__, __func__);
+				return FAILED;
+			}
+
+			if(validBaseFlag==NO)
+			{
+				endRow = i - 1;
+				break;
+			}
+		}
+		if(i>=queryLen)
+			endRow = queryLen - 1;
+
+		if(endRow>=0)
+			*endBasePos = endRow;
+		else
+			*endBasePos = -1;
+	}else
+	{
+		*endBasePos = -1;
+	}
+
+/*
 	int32_t i, j, validFlag;
 	char base1, base2;
 
 	*startBasePos = *endBasePos = -1;
-	for(i=0; i<queryLen-kmerSize; i++)
+	for(i=0; i<=queryLen-kmerSize; i++)
 	{
 		base1 = querySeq[i];
 		if(checkValidQueryBase(&validFlag, base1)==FAILED)
@@ -481,6 +594,7 @@ short getStartEndQueryPos(int32_t *startBasePos, int32_t *endBasePos, char *quer
 			break;
 		}
 	}
+*/
 
 	return SUCCESSFUL;
 }
@@ -718,25 +832,21 @@ short addQueryKmerQuerypos(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatc
 
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
-		//if(queryArray[i].misassFlag==POTENTIAL_MISASS || queryArray[i].queryID==queryMatchInfoSet->maxQueryID || queryArray[i].queryID==queryMatchInfoSet->secQueryID)
+		queryID = queryArray[i].queryID;
+		querySeq = queryArray[i].querySeq;
+		queryLen = queryArray[i].queryLen;
+
+		// get start and end query positions
+		startBasePos = endBasePos = -1;
+		if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
 		{
-			queryID = queryArray[i].queryID;
-			querySeq = queryArray[i].querySeq;
-			queryLen = queryArray[i].queryLen;
+			printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
 
-			// get start and end query positions
-			if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
-			{
-				printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
-				return FAILED;
-			}
-			if(startBasePos<0 || endBasePos<0)
-			{
-				continue;
-			}
-
-			queryPos = startBasePos + 1;
-
+		queryPos = startBasePos + 1;
+		while(startBasePos>=0 && endBasePos>=0)
+		{
 			// generate the first kmerseqInt
 			if(generateReadseqInt(pKmerSeqInt, querySeq+startBasePos, kmerSize, entriesPerKmer)==FAILED)
 			{
@@ -744,82 +854,130 @@ short addQueryKmerQuerypos(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatc
 				return FAILED;
 			}
 
-			// count the first scafKmer
+			// count the kmer
 			hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
 			if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot add kmer occurrence, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-			queryPos ++;
 
-			// process other scafKmers
-			for(basePos=startBasePos+kmerSize; basePos<=endBasePos; basePos++, queryPos++)
+			// update startBasePos
+			startBasePos += kmerSize;
+			queryPos = startBasePos + 1;
+			if(startBasePos>endBasePos)
 			{
-				validFlag = YES;
-				switch(querySeq[basePos])
+				// recalculate the start and end query positions
+				if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
 				{
-					case 'A':
-					case 'a': baseInt = 0; break;
-					case 'C':
-					case 'c': baseInt = 1; break;
-					case 'G':
-					case 'g': baseInt = 2; break;
-					case 'T':
-					case 't': baseInt = 3; break;
-					default: validFlag = NO;
+					printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+					return FAILED;
 				}
-
-				if(validFlag==YES)
-				{
-					// generate the kmer integer sequence
-					if(entriesPerKmer>=2)
-					{
-						for(j=0; j<entriesPerKmer-2; j++)
-						{
-							pKmerSeqInt[j] = (pKmerSeqInt[j] << 2) | (pKmerSeqInt[j+1] >> 62);
-						}
-						pKmerSeqInt[entriesPerKmer-2] = (pKmerSeqInt[entriesPerKmer-2] << 2) | (pKmerSeqInt[entriesPerKmer-1] >> (2*lastEntryBaseNum-2));
-					}
-					pKmerSeqInt[entriesPerKmer-1] = ((pKmerSeqInt[entriesPerKmer-1] << 2) | baseInt) & lastEntryMask;
-
-					hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
-					if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-				}else
-				{
-					// get next valid query base position
-					if(getNextValidQueryBasePos(&newBasePos, querySeq, basePos, endBasePos, kmerSize)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot get next valid query base position, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-					if(newBasePos<0)
-						break;
-
-					queryPos = newBasePos + 1;
-
-					// generate the first kmerseqInt
-					if(generateReadseqInt(pKmerSeqInt, querySeq+newBasePos, kmerSize, entriesPerKmer)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-
-					hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
-					if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
-					{
-						printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
-						return FAILED;
-					}
-
-					basePos += kmerSize - 1;
-				}
+				queryPos = startBasePos + 1;
+			}else if(startBasePos+kmerSize-1>endBasePos)
+			{
+				startBasePos = endBasePos - kmerSize + 1;
+				queryPos = startBasePos + 1;
 			}
 		}
+
+/*
+		// get start and end query positions
+		if(getStartEndQueryPos(&startBasePos, &endBasePos, querySeq, queryLen, kmerSize)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot get the start and end query positions, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		if(startBasePos<0 || endBasePos<0)
+		{
+			continue;
+		}
+
+		queryPos = startBasePos + 1;
+
+		// generate the first kmerseqInt
+		if(generateReadseqInt(pKmerSeqInt, querySeq+startBasePos, kmerSize, entriesPerKmer)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+
+		// count the first scafKmer
+		hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+		if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
+		{
+			printf("line=%d, In %s(), cannot add kmer occurrence, error!\n", __LINE__, __func__);
+			return FAILED;
+		}
+		queryPos ++;
+
+		// process other scafKmers
+		for(basePos=startBasePos+kmerSize; basePos<=endBasePos; basePos++, queryPos++)
+		{
+			validFlag = YES;
+			switch(querySeq[basePos])
+			{
+				case 'A':
+				case 'a': baseInt = 0; break;
+				case 'C':
+				case 'c': baseInt = 1; break;
+				case 'G':
+				case 'g': baseInt = 2; break;
+				case 'T':
+				case 't': baseInt = 3; break;
+				default: validFlag = NO;
+			}
+
+			if(validFlag==YES)
+			{
+				// generate the kmer integer sequence
+				if(entriesPerKmer>=2)
+				{
+					for(j=0; j<entriesPerKmer-2; j++)
+					{
+						pKmerSeqInt[j] = (pKmerSeqInt[j] << 2) | (pKmerSeqInt[j+1] >> 62);
+					}
+					pKmerSeqInt[entriesPerKmer-2] = (pKmerSeqInt[entriesPerKmer-2] << 2) | (pKmerSeqInt[entriesPerKmer-1] >> (2*lastEntryBaseNum-2));
+				}
+				pKmerSeqInt[entriesPerKmer-1] = ((pKmerSeqInt[entriesPerKmer-1] << 2) | baseInt) & lastEntryMask;
+
+				hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+				if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+			}else
+			{
+				// get next valid query base position
+				if(getNextValidQueryBasePos(&newBasePos, querySeq, basePos, endBasePos, kmerSize)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot get next valid query base position, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+				if(newBasePos<0)
+					break;
+
+				queryPos = newBasePos + 1;
+
+				// generate the first kmerseqInt
+				if(generateReadseqInt(pKmerSeqInt, querySeq+newBasePos, kmerSize, entriesPerKmer)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot generate the integer sequence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				hashcode = kmerhashInt(pKmerSeqInt, entriesPerKmer, lastEntryBaseNum, hashTableSize);
+				if(addQueryKmer(hashcode, pKmerSeqInt, queryID, queryPos, queryIndex)==FAILED)
+				{
+					printf("line=%d, In %s(), cannot count kmer occurrence, error!\n", __LINE__, __func__);
+					return FAILED;
+				}
+
+				basePos += kmerSize - 1;
+			}
+		}
+*/
 	}
 
 	return SUCCESSFUL;

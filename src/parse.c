@@ -71,8 +71,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 			return FAILED;
 		}
 
-		//printf("#### %s\n", line);
-
 		if(len==0)
 		{
 			if(fileStatus==EOF_STATUS)
@@ -103,7 +101,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 					{
 						pch ++;
 					}
-					//printf("queryTitle=%d\n", pch);
 					strcpy(queryTitle, pch);
 
 					stage = QUERY_TITLE_STAGE;
@@ -133,7 +130,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						pch ++;
 					}
 					queryLen = atoi(pch);
-					//printf("queryLen=%d\n", queryLen);
 
 					stage = QUERY_LEN_STAGE;
 
@@ -195,6 +191,18 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						pch ++;
 					}
 					subjectLen = atoi(pch);
+
+					// trim head title after space or tab character
+					pch = subjectTitle;
+					while(*pch)
+					{
+						if((*pch)==' ' || (*pch)=='\t')
+						{
+							*pch = '\0';
+							break;
+						}
+						pch ++;
+					}
 
 					fprintf(fpParseResult, ">%s\t%d\t%s\t%d\n", queryTitle, queryLen, subjectTitle, subjectLen);
 
@@ -268,7 +276,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						matchLen_ch[j] = '\0';
 						matchLen = atoi(matchLen_ch);
-						//printf("matchLen=%d\n", matchLen);
 
 						pch ++;
 						j = 0;
@@ -279,7 +286,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						totalMatchLen_ch[j] = '\0';
 						totalMatchLen = atoi(totalMatchLen_ch);
-						//printf("totalMatchLen=%d\n", totalMatchLen);
 
 						while(*pch!='(')
 						{
@@ -295,7 +301,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						matchPercent_ch[j] = '\0';
 						matchPercent = atof(matchPercent_ch) / 100.0;
-						//printf("matchPercent=%f\n", matchPercent);
 
 						while(*pch!='=')
 						{
@@ -307,7 +312,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 							pch ++;
 						}
 
-						//pch ++;
 						j = 0;
 						while(*pch!='/') // get the gapNum
 						{
@@ -316,7 +320,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						gapNum_ch[j] = '\0';
 						gapNum = atoi(gapNum_ch);
-						//printf("gapNum=%d\n", gapNum);
 
 						while(*pch!='(')
 						{
@@ -332,7 +335,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						gapPercent_ch[j] = '\0';
 						gapPercent = atof(gapPercent_ch) / 100.0;
-						//printf("gapPercent=%f\n", gapPercent);
 
 						step = IDENTITY_GAP_STEP;
 
@@ -398,7 +400,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						queryPos_ch[j] = '\0';
 						startQueryPos = atoi(queryPos_ch);
-						//printf("startQueryPos=%d\n", startQueryPos);
 
 						// get the end query pos
 						pch  = line + len - 1;
@@ -439,7 +440,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						subjectPos_ch[j] = '\0';
 						startSubjectPos = atoi(subjectPos_ch);
-						//printf("startSubjectPos=%d\n", startSubjectPos);
 
 						// get the end subject pos
 						pch = line + len - 1;
@@ -450,7 +450,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						pch ++;
 
 						endSubjectPos = atoi(pch);
-						//printf("endSubjectPos=%d\n", endSubjectPos);
 
 						step = STEP_INFO_STEP;
 						stepMatchFlag = STEP_SUBJECT_FLAG;
@@ -480,7 +479,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						pch ++;
 						endQueryPos = atoi(pch);
-						//printf("endQueryPos=%d\n", endQueryPos);
 
 						stepMatchFlag = STEP_QUERY_FLAG;
 						continue;
@@ -511,7 +509,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 						}
 						pch ++;
 						endSubjectPos = atoi(pch);
-						//printf("endSubjectPos=%d\n", endSubjectPos);
 
 						stepMatchFlag = STEP_SUBJECT_FLAG;
 						continue;
@@ -537,10 +534,6 @@ short parseBlastn(char *parseResultFile, const char *blastnResultFile)
 
 					// print the result
 					fprintf(fpParseResult, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.4f\n", startSubjectPos, endSubjectPos, startQueryPos, endQueryPos, strand, matchLen, totalMatchLen, gapNum, matchPercent);
-
-
-					// save the match result to files
-
 
 					continue;
 				}
