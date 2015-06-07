@@ -424,7 +424,7 @@ short createThreadsMap(pthread_t *threadArray, threadPara_t *threadParaArray, in
  */
 void mapReadsOpSingleThread(threadPara_t *threadPara)
 {
-	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2];
+	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2], autoMismatchNumThreshold;
 	readBlock_t *pReadBlockArray;
 	read_t *pRead, *pReadArray;
 	uint64_t rid, tmpRid, *readSeqInt, *readSeqIntRev;
@@ -505,6 +505,7 @@ void mapReadsOpSingleThread(threadPara_t *threadPara)
 		{
 			pRead = pReadArray + j;
 			seqLen = pRead->seqlen;
+			autoMismatchNumThreshold = seqLen * 0.05;
 
 //			if(rid==1918838 || rid==1565684)
 //			{
@@ -525,7 +526,7 @@ void mapReadsOpSingleThread(threadPara_t *threadPara)
 			if(pRead->validFlag==YES && (uniqueMapOpFlag==YES || (uniqueMapOpFlag==NO && pRead->successMapFlag==NO)))
 			{
 				// map single read
-				if(mapSingleReadToQueries(rid, pRead, readSet, matchResultArray, matchResultArrayBuf1, matchResultArrayBuf2, matchItemNum, queryIndex, queryMatchInfoSet->queryArray, 5)==FAILED)
+				if(mapSingleReadToQueries(rid, pRead, readSet, matchResultArray, matchResultArrayBuf1, matchResultArrayBuf2, matchItemNum, queryIndex, queryMatchInfoSet->queryArray, autoMismatchNumThreshold)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot map the read %lu, error!\n", __LINE__, __func__, rid);
 					return;
@@ -882,7 +883,7 @@ short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readS
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short mapSingleReadToQueries(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
+short mapSingleReadToQueries(uint64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
 {
 	int32_t tmpItemNum;
 
@@ -1219,7 +1220,7 @@ short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, int32_t orientation, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
+short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, int32_t orientation, const queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold)
 {
 	int32_t i, j, entriesNumRead, baseNumLastEntryRead, startBasePos, processedFlag;
 	uint64_t hashcode, kmerSeqInt[queryIndex->entriesPerKmer];
@@ -1230,7 +1231,7 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 
 	entriesNumRead = ((seqLen - 1) >> 5) + 1;
 	baseNumLastEntryRead = ((seqLen - 1) % 32) + 1;
-	queryEndIgnoreLen = 15;
+	queryEndIgnoreLen = 0.15 * seqLen;
 
 	*matchItemNum = 0;
 	if(seqLen>=queryIndex->kmerSize)
@@ -1240,9 +1241,8 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 
 		for(shiftBaseNum=0; shiftBaseNum<queryIndex->kmerSize; shiftBaseNum++)
 		{
-			startBasePos = shiftBaseNum;
 			maxStartBasePos = seqLen - queryIndex->kmerSize;
-			while(startBasePos<=maxStartBasePos)
+			for(startBasePos = shiftBaseNum; startBasePos<=maxStartBasePos; startBasePos += queryIndex->kmerSize)
 			{
 				// generate the kmer integer sequence
 				if(generateKmerSeqIntFromReadset(kmerSeqInt, readSeqInt, startBasePos, queryIndex->kmerSize, entriesNumRead, baseNumLastEntryRead)==FAILED)
@@ -1348,8 +1348,6 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 						}
 					}
 				}
-
-				startBasePos += queryIndex->kmerSize;
 			}
 		}
 	}
@@ -2234,12 +2232,13 @@ short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t startReadPos, int32_t kmerSize, int32_t entriesNum, int32_t baseNumLastEntry)
+short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t startReadPos, int32_t kmerSize, int32_t entriesNumRead, int32_t baseNumLastEntry)
 {
-	int32_t i, j, startEntryPos, remainedBaseNum, rightRemainedNum, entryRow, baseNumInEntry;
+	int32_t i, j, entriesNumKmer, startEntryPos, remainedBaseNum, rightRemainedNum, entryRow, baseNumInEntry;
 	uint64_t *readseqStart;
 
-	for(i=0; i<entriesNum; i++) seqInt[i] = 0;
+	entriesNumKmer = ((kmerSize - 1) >> 5) + 1;
+	for(i=0; i<entriesNumKmer; i++) seqInt[i] = 0;
 
 	entryRow = startReadPos >> 5;
 	readseqStart = readseq + entryRow;
@@ -2251,7 +2250,7 @@ short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t
 	while(remainedBaseNum>0)
 	{
 		// process first entry
-		if(entryRow!=entriesNum-1)
+		if(entryRow!=entriesNumRead-1)
 			baseNumInEntry = 32;
 		else
 			baseNumInEntry = baseNumLastEntry;
@@ -2272,7 +2271,7 @@ short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t
 		// process second entry
 		if(startEntryPos>0)
 		{
-			if(entryRow!=entriesNum-1)
+			if(entryRow!=entriesNumRead-1)
 				baseNumInEntry = 32;
 			else
 				baseNumInEntry = baseNumLastEntry;

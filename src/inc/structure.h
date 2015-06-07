@@ -110,12 +110,12 @@ typedef struct globalValidSegNode
 // queryReadNode
 typedef struct queryReadNode
 {
-	int64_t readID: 38;				// read ID
-	int64_t seqlen: 16;
-	int64_t startReadPos: 8;
-	int64_t orientation: 2;
-	int32_t alignSize;
-	int32_t queryPos;			// the query position
+	uint32_t readID;				// read ID
+	uint16_t seqlen;
+	uint16_t startReadPos;
+	uint16_t orientation;
+	uint16_t alignSize;
+	uint32_t queryPos;			// the query position
 }queryRead_t;
 
 typedef struct queryReadSetNode
@@ -243,13 +243,13 @@ typedef struct metricsNode
 //read
 typedef struct readNode
 {
-	uint64_t rowReadseqInBlock: 26;		// point to the row of readseqBlock.readseqArr
-	uint64_t readseqBlockID: 16;
-	uint64_t nBaseNum: 9;		// unknown base count: it will be changed to 'C' automatically
-	uint64_t seqlen: 10;
-	uint64_t validFlag: 1;
-	uint64_t successMapFlag: 1;
-	uint64_t uniqueMapFlag: 1;
+	uint32_t rowReadseqInBlock;		// point to the row of readseqBlock.readseqArr
+	uint16_t readseqBlockID;
+	uint16_t nBaseNum;		// unknown base count: it will be changed to 'C' automatically
+	uint16_t seqlen;
+	uint16_t validFlag: 2;
+	uint16_t successMapFlag: 2;
+	uint16_t uniqueMapFlag: 2;
 }read_t;
 
 // read block
@@ -298,13 +298,13 @@ typedef struct readseqHashBucketNode
 // readMatchInfo
 typedef struct readMatchInfoNode
 {
-	uint64_t queryID: 23;
-	uint64_t queryPos: 25;			// the query position
-	uint64_t alignSize: 16;
-	uint64_t readID: 39;
-	uint64_t seqlen: 16;
-	uint64_t startReadPos: 8;
-	uint64_t readOrientation: 1;
+	uint32_t queryID;
+	uint32_t queryPos;			// the query position
+	uint32_t readID;
+	uint16_t seqlen;
+	uint16_t alignSize;
+	uint16_t startReadPos;
+	uint16_t readOrientation;
 }readMatchInfo_t;
 
 // read block
@@ -488,9 +488,9 @@ typedef struct alignMatchItemNode
 	int32_t mismatchNum: 10;
 	int32_t pairRow: 16;
 	int32_t validFlag: 3;
-	int32_t startReadPos: 8;  // start with 1
-	int32_t alignSize: 8;
-	int32_t fragSize: 16;
+	int16_t startReadPos;  // start with 1
+	int16_t alignSize;
+	int16_t fragSize;
 }alignMatchItem_t;
 
 

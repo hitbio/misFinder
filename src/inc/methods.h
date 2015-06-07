@@ -25,6 +25,7 @@ short parseConfigFile(char *inputQueryFileInit, char *subjectSegsFile, readFile_
 short addToReadFileList(readFile_t **readFileList, char *readFiles);
 short getReadsFileFormat(int32_t *readsFileFormatType, char **readFilesInput, int32_t readFileNum);
 short checkFilesInConfigfile(int32_t operationMode, char *inputQueryFileInit, char *subjectsFile, readFile_t *readFileList);
+short outputConfigInfo(int32_t operationMode, char *inputQueryFileInit, char *subjectsFile, readFile_t *readFileList);
 short copyQueryFile(char *inputQueryFile, char *inputQueryFileInit);
 
 // ================= subjectMerge.c ====================
@@ -250,7 +251,7 @@ short checkValidQueryBase(int32_t *validFlag, char base);
 short getNextValidQueryBasePos(int32_t *newBasePos, char *querySeq, int32_t basePos, int32_t endBasePos, int32_t kmerSize);
 uint64_t kmerhashInt(uint64_t *seqInt, int32_t entriesPerKmer, int32_t lastEntryBaseNum, int64_t hashArraySize);
 short countQueryKmer(uint64_t hashcode, uint64_t *kmerSeqInt, queryIndex_t *queryIndex);
-queryKmer_t *getQueryKmerByHash(uint64_t hashvalue, uint64_t *kmerSeqInt, queryIndex_t *queryIndex);
+queryKmer_t *getQueryKmerByHash(uint64_t hashvalue, uint64_t *kmerSeqInt, const queryIndex_t *queryIndex);
 short identicalKmerSeq(uint64_t *kmerSeqInt1, uint64_t *kmerSeqInt2, int32_t entriesNum);
 short addQueryKmerQuerypos(queryIndex_t *queryIndex, queryMatchInfo_t *queryMatchInfoSet);
 short initQueryposBlocksInQueryIndex(queryIndex_t *queryIndex);
@@ -275,11 +276,11 @@ void mapReadsOpSingleThread(threadPara_t *threadPara);
 short getMaxArraySizeFromQueryIndex(int32_t *maxArraySize, queryIndex_t *queryIndex);
 short estimateInsertSize(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, queryIndex_t *queryIndex);
 short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, queryIndex_t *queryIndex);
-short mapSingleReadToQueries(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
+short mapSingleReadToQueries(uint64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
 short mapSingleReadToQueriesPerfect(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, queryIndex_t *queryIndex);
 short getMatchedQueryPosPerfect(alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf1, alignMatchItem_t *matchResultArrayBuf2, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, queryIndex_t *queryIndex);
 short mapSingleReadToQueriesWithMismatch(int64_t rid, read_t *pRead, readSet_t *readSet, alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf, int32_t *matchItemNum, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
-short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, int32_t orientation, queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
+short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t *matchItemNum, uint64_t *readSeqInt, int32_t seqLen, int32_t orientation, const queryIndex_t *queryIndex, query_t *queryArray, int32_t mismatchNumThreshold);
 short isProcessedMatchItem(int32_t *processedFlag, int32_t startAlignQueryPos, int32_t startBasePos, alignMatchItem_t *matchResultArray, int32_t matchItemNum);
 short getMatedNumAlignResult(int32_t *matedNum, alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t matchItemNum1, int32_t matchItemNum2, int32_t seqLen1, int32_t seqLen2, double insertSize, double standDev);
 short computeUniqueMapFlags(int32_t *uniqueMapFlagArray, int32_t matedNum, alignMatchItem_t *matchResultArray1, alignMatchItem_t *matchResultArray2, int32_t matchItemNum1, int32_t matchItemNum2);
@@ -290,7 +291,7 @@ short getMoreAlignItemsFromUnmatedPE(int32_t *matedNum, int64_t readID1, int64_t
 short getAlignItemsFromUnmatedEnd(int32_t *matedNum, read_t *pRead, alignMatchItem_t *matchResultArray, int32_t *matchItemNum, read_t *pReadBased, alignMatchItem_t *matchResultArrayBased, int32_t matchItemNumBased, int32_t mismatchNumThreshold, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
 short getAlignItemsFromSingleUnmatedPos(int32_t *matedNum, read_t *pRead, alignMatchItem_t *matchResultArray, int32_t *matchItemNum, read_t *pReadBased, alignMatchItem_t *matchResultArrayBased, int32_t itemRowBased, int32_t mismatchNumThreshold, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
 short updateQueryCovFlag(queryMatchInfo_t *queryMatchInfoSet, alignMatchItem_t *alignMatchItem, threadPara_t *threadPara);
-short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t startReadPos, int32_t kmerSize, int32_t entriesNum, int32_t baseNumLastEntry);
+short generateKmerSeqIntFromReadset(uint64_t *seqInt, uint64_t *readseq, int32_t startReadPos, int32_t kmerSize, int32_t entriesNumRead, int32_t baseNumLastEntry);
 short getRowRangeMatchArray(int32_t *startRow, int32_t *endRow, alignMatchItem_t *matchResultArray, int32_t arraySize, int32_t queryID);
 short fillReadMatchInfoQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray);
 short initQueryReadSets(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray);

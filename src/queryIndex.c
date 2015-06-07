@@ -756,7 +756,7 @@ short countQueryKmer(uint64_t hashcode, uint64_t *kmerSeqInt, queryIndex_t *quer
 	return SUCCESSFUL;
 }
 
-queryKmer_t *getQueryKmerByHash(uint64_t hashvalue, uint64_t *kmerSeqInt, queryIndex_t *queryIndex)
+queryKmer_t *getQueryKmerByHash(uint64_t hashvalue, uint64_t *kmerSeqInt, const queryIndex_t *queryIndex)
 {
 	queryKmer_t *kmer;
 	uint64_t *kmerseq;

@@ -147,6 +147,13 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *configF
 		return FAILED;
 	}
 
+	// output the configuration information
+	if(outputConfigInfo(operationMode, inputQueryFileInit, subjectsFile, readFileList)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot output configuration information, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
 	// set file names
 	strcpy(mergedSegFile, outputPathStr);
 	strcat(mergedSegFile, "mergedRefSegs");
@@ -656,13 +663,13 @@ short checkFilesInConfigfile(int32_t operationMode, char *inputQueryFileInit, ch
 						continue;
 				}
 
-				fileNumTmp ++;
-
 				if(stat(fileNameTmp, &st)==-1)
 				{
 					printf("line=%d, In %s(), please specify the correct subject [ %s ] in configuration file.\n", __LINE__, __func__, fileNameTmp);
 					return FAILED;
 				}
+
+				fileNumTmp ++;
 			}
 
 			if(fileNumTmp==0)
@@ -697,6 +704,15 @@ short checkFilesInConfigfile(int32_t operationMode, char *inputQueryFileInit, ch
 					return FAILED;
 				}
 
+				if(i==1)
+				{
+					if(strcmp(readFileNode->readFiles[0], readFileNode->readFiles[1])==0)
+					{
+						printf("line=%d, In %s(), please specify the correct read file [ %s ] in configuration file.\n", __LINE__, __func__, readFileNode->readFiles[1]);
+						return FAILED;
+					}
+				}
+
 				i ++;
 			}
 
@@ -716,6 +732,95 @@ short checkFilesInConfigfile(int32_t operationMode, char *inputQueryFileInit, ch
 			return FAILED;
 		}
 	}
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Output the configuration information.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short outputConfigInfo(int32_t operationMode, char *inputQueryFileInit, char *subjectsFile, readFile_t *readFileList)
+{
+	int32_t i, j;
+	struct stat st;
+	FILE *subjectFileTmp;
+	int32_t len, fileStatus, fileNumTmp;
+	char fileNameTmp[LINE_CHAR_MAX+1];
+	readFile_t *readFileNode;
+
+	printf("\nConfiguration information:\n");
+
+	// check the query and subjects file names
+	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MERGE || operationMode==OPERATION_MODE_METRICS)
+	{
+		printf("  Query file: %s\n", inputQueryFileInit);
+
+		printf("  Subject files:\n");
+
+		subjectFileTmp = fopen(subjectsFile, "r");
+		if(subjectFileTmp==NULL)
+		{
+			printf("line=%d, In %s(), cannot open file [ %s ], error!\n", __LINE__, __func__, subjectsFile);
+			return FAILED;
+		}
+
+		fileNumTmp = 0;
+		while(1)
+		{
+			if(readLine(&fileStatus, fileNameTmp, &len, LINE_CHAR_MAX, subjectFileTmp)==FAILED)
+			{
+				printf("In %s(), cannot read a line, error!\n", __func__);
+				return FAILED;
+			}
+
+			if(len==0)
+			{
+				if(fileStatus==EOF_STATUS)
+					break;
+				else
+					continue;
+			}
+
+			printf("    [%d]: %s\n", fileNumTmp, fileNameTmp);
+
+			fileNumTmp ++;
+		}
+
+		fclose(subjectFileTmp);
+	}
+
+	// check the read file names
+	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MISASS)
+	{
+		printf("  Read files:\n");
+
+		fileNumTmp = 0;
+		readFileNode = readFileList;
+		while(readFileNode)
+		{
+			printf("    [%d]: ", fileNumTmp);
+
+			i = 0;
+			while(i<readFileNode->readFileNum)
+			{
+				if(i==0)
+					printf("%s", readFileNode->readFiles[i]);
+				else
+					printf(", %s", readFileNode->readFiles[i]);
+
+				i ++;
+			}
+			printf("\n");
+
+			fileNumTmp ++;
+
+			readFileNode = readFileNode->next;
+		}
+	}
+
+	printf("\n");
 
 	return SUCCESSFUL;
 }
