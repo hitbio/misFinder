@@ -33,7 +33,7 @@ short classifyQueries(char *perfectQueryFile, char *matchedQueryFile, char *disj
 	for(i=0; i<queryMatchInfoSet->itemNumQueryArray; i++)
 	{
 		// ########################### Debug information ##############################
-		//if(queryMatchInfoSet->queryArray[i].queryID==464 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "scf7180000014282")==0)
+		//if(queryMatchInfoSet->queryArray[i].queryID==46400 || strcmp(queryMatchInfoSet->queryArray[i].queryTitle, "scf7180000616044")==0)
 		//{
 		//	printf("queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryMatchInfoSet->queryArray[i].queryID, queryMatchInfoSet->queryArray[i].queryTitle, queryMatchInfoSet->queryArray[i].queryLen, queryMatchInfoSet->queryArray[i].querySubjectNum);
 		//}
@@ -787,6 +787,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 							}
 						}
 					}
+					else if(matchItemArray[i].startQueryPos > matchItemArray[startRowID].startQueryPos && matchItemArray[i].startQueryPos < matchItemArray[startRowID].endQueryPos && matchItemArray[i].endQueryPos>matchItemArray[startRowID].endQueryPos)
+					{
+						*adjacentRowID = i;
+						break;
+					}
 				}else
 				{ // the second selection round
 					if(matchItemArray[i].endQueryPos >= matchItemArray[startRowID].startQueryPos-varyEndLenThres && matchItemArray[i].endQueryPos <= matchItemArray[startRowID].startQueryPos+varyEndLenThres)
@@ -799,6 +804,11 @@ short getAdjacentSegment(int64_t *adjacentRowID, int64_t startRowID, matchItem_t
 								break;
 							}
 						}
+					}
+					else if(matchItemArray[i].startQueryPos< matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos > matchItemArray[startRowID].startQueryPos && matchItemArray[i].endQueryPos<matchItemArray[startRowID].endQueryPos)
+					{
+						*adjacentRowID = i;
+						break;
 					}
 				}
 			}

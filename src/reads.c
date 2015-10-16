@@ -157,7 +157,7 @@ short constructReadsetByPEFastaSeparate(readSet_t *readSet, char **readsFileName
 {
 	readBuf_t *readBuf[2];
 	FILE *fp1, *fp2;
-	uint32_t i, j, tmpReadsNum[2], tmpFileID;
+	int32_t i, j, tmpReadsNum[2], tmpFileID;
 	int32_t percent, seqIntEntriesNum;
 	int64_t tmpReadCount;
 
@@ -489,7 +489,7 @@ short constructReadsetByPEFastqSeparate(readSet_t *readSet, char **readsFileName
 {
 	readBuf_t *readBuf[2];
 	FILE *fp1, *fp2;
-	uint32_t i, j, tmpReadsNum[2], tmpFileID;
+	int32_t i, j, tmpReadsNum[2], tmpFileID;
 	int32_t percent, seqIntEntriesNum;
 	int64_t tmpReadCount;
 

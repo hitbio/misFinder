@@ -47,7 +47,7 @@ short getMisInfoList(query_t *queryItem, subject_t *subjectArray)
  */
 short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 {
-	int32_t i, globalSegNum, subjectID, subjectLen, queryID, queryLen, startItemRow, endItemRow,  misType, misjoinFlag, circularFlag;
+	int32_t i, tmp, globalSegNum, subjectID, subjectLen, queryID, queryLen, startItemRow, endItemRow,  misType, misjoinFlag, circularFlag;
 	int32_t difQuery, difSubject, indelKind, gapFlag, circularRegFlag;
 	int64_t leftMargin, rightMargin, leftMarginSubject, rightMarginSubject, startSegPos, endSegPos;
 	globalValidSeg_t *globalSegArray;
@@ -260,6 +260,12 @@ short getMisInfoListBreakpoint(query_t *queryItem, subject_t *subjectArray)
 					rightMarginSubject = globalSegArray[endItemRow].startSubPos;
 					subjectID = globalSegArray[startItemRow].subjectID;
 
+					if(leftMargin>rightMargin)
+					{
+						tmp = leftMargin; leftMargin = rightMargin; rightMargin = tmp;
+						tmp = leftMarginSubject; leftMarginSubject = rightMarginSubject; rightMarginSubject = tmp;
+					}
+
 					if(addNewQueryMisInfoNode(queryItem, startItemRow, endItemRow, QUERY_INDEL_KIND, indelKind, gapFlag, NO, leftMargin, rightMargin, leftMarginSubject, rightMarginSubject, subjectID, difQuery, difSubject)==FAILED)
 					{
 						printf("line=%d, In %s(), cannot add new query mis-assembly information node, error!\n", __LINE__, __func__);
@@ -319,7 +325,7 @@ short adjustMisInfoList(query_t *queryItem)
 		misInfoNext = misInfo->next;
 		if(misInfo->misType==QUERY_MISJOIN_KIND && misInfoNext && misInfoNext->misType==QUERY_MISJOIN_KIND)
 		{
-			if(misInfoNext->queryMargin->rightMargin-misInfo->queryMargin->leftMargin<1000)
+			if(misInfoNext->queryMargin->rightMargin-misInfo->queryMargin->leftMargin<1000 || misInfoNext->queryMargin->leftMargin-misInfo->queryMargin->rightMargin<50)
 			{
 				if(misInfo->queryMargin->leftMargin>misInfoNext->queryMargin->leftMargin)
 					misInfo->queryMargin->leftMargin = misInfoNext->queryMargin->leftMargin;
@@ -1352,15 +1358,19 @@ short addNewQueryMisInfoNode(query_t *queryItem, int32_t leftSegRow, int32_t rig
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
+short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet)
 {
 	int32_t queryLen;
 	baseCov_t *baseCovArray;
-	char covFileName[256], covReadsFileName[256];
+//	char covFileName[256], covReadsFileName[256], regCovFileName[256];
 
 //	strcpy(covFileName, outputPathStr);
 //	strcat(covFileName, queryItem->queryTitle);
 //	strcat(covFileName, ".cov");
+
+//	strcpy(regCovFileName, outputPathStr);
+//	strcat(regCovFileName, queryItem->queryTitle);
+//	strcat(regCovFileName, ".regcov");
 
 //	strcpy(covReadsFileName, outputPathStr);
 //	strcat(covReadsFileName, queryItem->queryTitle);
@@ -1381,6 +1391,20 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 		return FAILED;
 	}
 
+	// compute the region coverage
+	if(computeRegCovSingleQuery(queryItem, baseCovArray, queryLen)==FAILED)
+	{
+		printf("line=%d, In %s(), cannot output the base coverage of single query to file, error!\n", __LINE__, __func__);
+		return FAILED;
+	}
+
+//	// output the region coverage to file
+//	if(outputRegCovSingleQueryToFile(regCovFileName, baseCovArray, queryLen)==FAILED)
+//	{
+//		printf("line=%d, In %s(), cannot output the base coverage of single query to file, error!\n", __LINE__, __func__);
+//		return FAILED;
+//	}
+
 	// output the coverage to file
 //	if(outputBaseCovSingleQueryToFile(covFileName, baseCovArray, queryLen)==FAILED)
 //	{
@@ -1398,7 +1422,7 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
 //	}
 
 	// determine misjoin
-	if(computeMisjoinSingleQuery(queryItem, baseCovArray, subjectArray, readSet, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
+	if(computeMisjoinSingleQuery(queryItem, baseCovArray, subjectArray, readSet)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the misjoin, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -1427,7 +1451,7 @@ short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, r
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
+short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet)
 {
 	int32_t misjoinRegNum;
 	misInfo_t *misInfo;
@@ -1443,7 +1467,7 @@ short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, sub
 
 	if(misjoinRegNum>0)
 	{
-		// compute the S/P, S-/S, S+/S ratios in breakpoint regions
+		// compute the discorRatio, multiRatio in breakpoint regions
 		if(computeBreakpointRatios(queryItem, misjoinRegNum, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the ratios of normal regions, error!\n", __LINE__, __func__);
@@ -1451,11 +1475,15 @@ short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, sub
 		}
 
 		// determine the mis-assembly
-		if(determineMisassFlag(queryItem, misjoinRegNum, baseCovArray, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
+		if(determineMisassFlag(queryItem, misjoinRegNum, baseCovArray, readSet)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot determine the mis-assembly flag of query, error!\n", __LINE__, __func__);
 			return FAILED;
 		}
+
+		// adjust breakpoint margins
+
+
 	}
 
 	return SUCCESSFUL;
@@ -1508,7 +1536,7 @@ short outputMisInfoList(query_t *queryItem)
 		if(tailMisInfo->misType==QUERY_MISJOIN_KIND)
 		{
 			queryMargin = tailMisInfo->queryMargin;
-			printf("reg[%d]: [%d, %d], leftRow=%d, rightRow=%d, misType=%d, misassFlag=%d, gapFlag=%d, innerFlag=%d, endFlag=%d, disagreeNum=%d, zeroCovNum=%d, discorNum=%d, highCovRegNum=%d, lowCovRegNum=%d, SPRatio=%.4f, SMinusRatio=%.4f, SPlusRatio=%.4f, discorRatio=%.4f, multiRatio=%.4f\n", i, queryMargin->leftMargin, queryMargin->rightMargin, tailMisInfo->leftSegRow, tailMisInfo->rightSegRow, tailMisInfo->misType, tailMisInfo->misassFlag, tailMisInfo->gapFlag, tailMisInfo->innerFlag, queryMargin->queryEndFlag, queryMargin->disagreeNum, queryMargin->zeroCovNum, queryMargin->discorNum, queryMargin->highCovRegNum, queryMargin->lowCovRegNum, queryMargin->SPRatio, queryMargin->singleMinusRatio, queryMargin->singlePlusRatio, queryMargin->discorRatio, queryMargin->multiReadsRatio);
+			printf("reg[%d]: [%d, %d], leftRow=%d, rightRow=%d, misType=%d, misassFlag=%d, gapFlag=%d, innerFlag=%d, endFlag=%d, disagreeNum=%d, zeroCovNum=%d, discorNum=%d, highCovRegNum=%d, lowCovRegNum=%d, discorRatio=%.4f, multiRatio=%.4f\n", i, queryMargin->leftMargin, queryMargin->rightMargin, tailMisInfo->leftSegRow, tailMisInfo->rightSegRow, tailMisInfo->misType, tailMisInfo->misassFlag, tailMisInfo->gapFlag, tailMisInfo->innerFlag, queryMargin->queryEndFlag, queryMargin->disagreeNum, queryMargin->zeroCovNum, queryMargin->discorNum, queryMargin->highCovRegNum, queryMargin->lowCovRegNum, queryMargin->discorRatio, queryMargin->multiReadsRatio);
 		}else
 		{
 			queryIndel = tailMisInfo->queryIndel;

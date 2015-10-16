@@ -32,7 +32,7 @@ short parseCommandParasAndExe(int argc, char **argv)
 	int32_t i, operationMode;
 	char configFilePara[256];
 	char outputDirPara[256];
-	int32_t minQueryLenPara, threadNumPara;
+	int32_t singleCellFlagPara, minQueryLenPara, threadNumPara;
 	double minIdentityPercentPara;
 	int32_t indelSizeThresPara;
 
@@ -92,6 +92,7 @@ short parseCommandParasAndExe(int argc, char **argv)
 		operationMode = -1;
 		configFilePara[0] = '\0';
 		outputDirPara[0] = '\0';
+		singleCellFlagPara = 0;
 		minQueryLenPara = 0;
 		minIdentityPercentPara = 0;
 		threadNumPara = 0;
@@ -268,6 +269,29 @@ short parseCommandParasAndExe(int argc, char **argv)
 					return FAILED;
 				}
 				i += 2;
+			}else if(strcmp(argv[i], "-sc")==0)
+			{
+				if(i+1<argc)
+				{
+					if(argv[i+1][0]!='-')
+					{
+						singleCellFlagPara = atol(argv[i+1]);
+						if(singleCellFlagPara!=0 && singleCellFlagPara!=1)
+						{
+							printf("Exception: please specify the correct single cell data flag if the paired-end reads was sequenced by the single cell technology.\n");
+							return FAILED;
+						}
+					}else
+					{
+						printf("Exception: please specify the correct single cell data flag.\n");
+						return FAILED;
+					}
+				}else
+				{
+					printf("Exception: please specify the single cell data flag.\n");
+					return FAILED;
+				}
+				i += 2;
 			}else if(strcmp(argv[i], "-h")==0 || strcmp(argv[i], "-help")==0)
 			{
 				if(showUsageInfo()==FAILED)
@@ -305,7 +329,7 @@ short parseCommandParasAndExe(int argc, char **argv)
 		}
 
 		// begin to do the job
-		if(computeGlobalMetrics(operationMode, outputDirPara, configFilePara, minQueryLenPara, minIdentityPercentPara, threadNumPara, indelSizeThresPara)==FAILED)
+		if(computeGlobalMetrics(operationMode, outputDirPara, configFilePara, minQueryLenPara, minIdentityPercentPara, threadNumPara, indelSizeThresPara, singleCellFlagPara)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the metrics, error!\n", __LINE__, __func__);
 			return ERROR;
@@ -349,6 +373,9 @@ short showUsageInfo()
 	printf("    -i <INT>           Minimal indel size. Default is 5 bp.\n");
 	printf("    -t <INT>           The number of threads for reads alignment. Default is\n"
 		   "                       the number of CPU cores.\n");
+	printf("    -sc <INT>          Single-cell paired-end data flag. Default is 0.\n"
+		   "                       0: standard genomic DNA prepared from culture;\n"
+		   "                       1: single-cell data.\n");
 	printf("    -o <STR>\n");
 	printf("    -out <STR>         Output directory for the output files. Default is \"./\"\n");
 	printf("    -h\n");

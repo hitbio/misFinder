@@ -23,6 +23,7 @@ extern char queryMatchInfoFile[256];
 
 extern char newQueryFile[256];
 
+extern int32_t singleCellFlag;					// default is 0. 0 -- non single-cell data; 1 -- single-cell data
 extern int32_t minQueryLenThres;				// can be user-defined, default 100
 extern int32_t shortQueryLenThres;				// can be user-defined, default 200
 extern double matchPercentThres;				// can be user-defined, default 0.95
@@ -60,9 +61,6 @@ extern uint64_t *pReadseqTmpDoing;
 
 extern readseqHashItemBlock_t *pReadseqHashItemBlockTmp;
 extern readseqHashItem_t *pReadseqHashItemTmpDoing;
-
-extern double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres;
-extern double discorRatio_Thres;
 
 
 #endif /* EXTVAB_H_ */

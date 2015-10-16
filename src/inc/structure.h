@@ -45,8 +45,6 @@ typedef struct
 
 	// parameters for mis-assembly identification, SV validation, error correction
 	//int32_t startQueryID, endQueryID, itemNumQuery;
-	double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres;
-
 }threadPara_t;
 
 typedef struct
@@ -122,7 +120,6 @@ typedef struct queryReadSetNode
 {
 	queryRead_t *queryReadArray;
 	int32_t queryReadNum, setID;	// setID: starts from 1
-	//double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres, discorRatio_Thres;
 }queryReadSet_t;
 
 // new querySeq
@@ -163,6 +160,9 @@ typedef struct
 
 	struct misInfoNode *misInfoList, *tailMisInfo;
 	int32_t misInfoItemNum;
+
+	int32_t subRegSize;
+	double meanRegCov, sdevRegCov;
 }query_t;
 
 typedef struct queryMatchInfoNode
@@ -271,11 +271,9 @@ typedef struct readseqBlockNode
 //readseq hash node
 typedef struct readseqHashItemNode
 {
-	//uint64_t *readseq;
 	uint32_t rowReadseqInBlock;		// point to the row of readseqBlock.readseqArr
 	uint16_t readseqBlockID;
 	uint16_t seqlen;
-	//struct readseqHashItemNode *next;
 	uint32_t nextHashItemBlockID;
 	uint32_t nextItemRowHashItemBlock;
 }readseqHashItem_t;
@@ -377,7 +375,6 @@ typedef struct readFileNode
 //readSet array
 typedef struct readSetArrNode
 {
-	//readFile_t *readFileList;
 	readSet_t *readSetArray;
 	int32_t readSetNum;
 }readSetArr_t;
@@ -484,10 +481,11 @@ typedef struct alignMatchItemNode
 {
 	int32_t queryID;
 	int32_t queryPos;
-	int32_t orientation: 3;
-	int32_t mismatchNum: 10;
-	int32_t pairRow: 16;
-	int32_t validFlag: 3;
+	int16_t mismatchNum;
+	int16_t pairRow;
+	int8_t orientation;
+	int8_t validFlag;
+	int16_t headSkipNum, tailSkipNum;
 	int16_t startReadPos;  // start with 1
 	int16_t alignSize;
 	int16_t fragSize;
@@ -503,8 +501,8 @@ typedef struct baseCovNode
 typedef struct queryMarginNode
 {
 	int32_t leftMargin, rightMargin, misassFlag, queryEndFlag;
-	int32_t disagreeNum, zeroCovNum, discorNum, highCovRegNum, lowCovRegNum;
-	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio, multiReadsRatio;
+	int32_t disagreeNum, zeroCovNum, discorNum, highCovRegNum, lowCovRegNum, disagreeRegSize;
+	double discorRatio, multiReadsRatio, ratioMateNumOtherQuery;
 }queryMargin_t;
 
 
@@ -513,9 +511,9 @@ typedef struct ratioRegionNode
 	int32_t disagreeNum, zeroCovNum;
 	int32_t startQPosLHalf, endQPosLHalf, startQPosRHalf, endQPosRHalf, midQPos;
 
-	int32_t pairedNum, singleNum, singleNumLeftHalf, singleNumRightHalf, singleMinusNum, singlePlusNum, discorNum;
-	int32_t multiMapReadsNum, totalReadsNum;
-	double SPRatio, singleMinusRatio, singlePlusRatio, discorRatio, multiReadsRatio;
+	int32_t pairedNum, singleNum, singleNumLeftHalf, singleNumRightHalf, discorNum;
+	int32_t multiMapReadsNum, totalReadsNum, mateNumOtherQuery;
+	double discorRatio, multiReadsRatio, ratioMateNumOtherQuery;
 }ratioRegion_t;
 
 
@@ -524,9 +522,10 @@ typedef struct queryIndelNode
 	int32_t leftSegRow, rightSegRow;
 	int16_t queryIndelKind, misassFlag;
 	int32_t leftMargin, rightMargin, subjectID, leftMarginSubject, rightMarginSubject;
-	int32_t pairNumLeft, discorNumLeft, pairNumRight, discorNumRight, pairNumLeftTotal, pairNumRightTotal;
+	int32_t pairNumLeft, discorNumLeft, pairNumRight, discorNumRight;
 	int32_t disagreeNum, zeroCovNum, difSubject, difQuery, highCovRegNum, lowCovRegNum, disagreeRegSize;
 	double averFragSizeLeft, averFragSizeRight, difFragSizeLeft, difFragSizeRight, discorRatioLeft, discorRatioRight;
+	int32_t disagreeNumInRatioRegion, zeroCovNumInRatioRegion, discorRegNumInRatioRegion, multiReadsRegNumInRatioRegion;
 }queryIndel_t;
 
 

@@ -3,16 +3,19 @@ misFinder- Identify mis-assemblies in an unbiased manner using reference and pai
 
 misFinder is a tool that aims to identify the assembly errors with high accuracy in an unbiased way and correct these errors at their mis-assembled positions to improve the assembly accuracy for downstream analysis. It combines the information of reference (or close related reference) genome and aligned paired-end reads to the assembled sequence. Structure variation and mis-assembly can be detected by comparing the reference genome and assembled sequence. Different types of assembly errors can then be distinguished from the mis-assembled sequences by analyzing the aligned paired-end reads using multiple features derived from coverage and consistence of insert distance to obtain high confident error calls.
 
-misFinder is based on BLASTN (version 2.2.25+ and higher), and assembly (contigs/scaffolds), genome reference and paired-end reads from Solexa sequencing technology are its input. BLASTN can be downloaded from http://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=BlastDocs&DOC_TYPE=Download, and then the BLASTN command 'blastn' should be added into to PATH or into one of the following directories: /usr/local/bin, /usr/bin, /bin, /usr/local/sbin, /usr/sbin, /sbin, $HOME/bin.
+misFinder is based on BLASTN (version 2.2.25+ and higher), and assembly (contigs/scaffolds), genome reference and paired-end reads from Solexa sequencing technology are its input. BLASTN can be downloaded from http://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=BlastDocs&DOC_TYPE=Download, and then the BLASTN command 'blastn' should be added into to $PATH or into one of the following directories: /usr/local/bin, /usr/bin, /bin, /usr/local/sbin, /usr/sbin, /sbin, $HOME/bin.
 
 There is a configuration file to configure the assembly, reference and paired-end reads information before running misFinder. The configuration file can be found in the downloaded folder.
 
-misFinder can accepte the paired-end reads in fastq or fasta file format, and these paired-end reads can be stored interleaved in a single file (paired_reads.fastq) or stored in two separate files (reads_1.fastq and reads_2.fastq).
+misFinder can accepte the paired-end reads in fastq or fasta file format, and these paired-end reads can be stored interleaved in a single file (paired_reads.fastq) or stored in two separate files (reads_1.fastq and reads_2.fastq). Reads can be all the same length or different lengths.
 
 -------------
 misFinder command
 If the assembly, reference and paired-end reads information are configured in the configuration file, the command will be:
 $ ./mf all -conf config_file -o output
+
+For single-cell paired-end data, the option '-sc' is required be set to 1, and the command will be:
+$ ./mf all -sc 1 -conf config_file -o output
 
 Then, misFinder will perform the BLASTN alignment, identify the assembly errors and correct assemblies due to structural variations, and then correct the assembly errors at their breakpoints. Finally, the final results will be output into five files, including four files for the identified mis-assembly information and one file for the corrected assemblies:
 (1) result_errors:

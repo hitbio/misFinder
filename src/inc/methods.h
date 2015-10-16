@@ -17,8 +17,8 @@ short showUsageInfo();
 
 
 // ================= globalMetrics.c ====================
-int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara);
-short initGlobalParas(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara);
+int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara, int32_t singleCellFlagPara);
+short initGlobalParas(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara, int32_t singleCellFlagPara);
 short setGlobalPath(const char *outPathStr);
 void resetGlobalParas();
 short parseConfigFile(char *inputQueryFileInit, char *subjectSegsFile, readFile_t **readFileList, char *configFile);
@@ -203,16 +203,18 @@ short initMemMisass(queryMatchInfo_t **queryMatchInfoSet, char *errorsFile, char
 void freeMemMisass(queryMatchInfo_t **queryMatchInfoSet, readSetArr_t **readSetArray, queryIndex_t **queryIndex);
 short computePotentMisassNum(queryMatchInfo_t *queryMatchInfoSet);
 short computeMisassQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, int32_t threadNum);
-short initThreadParasMisass(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres, double discorRatio_Thres);
+short initThreadParasMisass(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
 short freeThreadParasMisass(pthread_t **threadArray, threadPara_t **threadParaArray, int32_t threadNum);
 short createThreadsMisass(pthread_t *threadArray, threadPara_t *threadParaArray, int32_t threadNum);
 void computeMisassQueriesSingleThread(threadPara_t *threadPara);
-short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres);
+short computeSingleMisassQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet);
 short computeBaseCovSingleQuery(baseCov_t *baseCovArray, query_t *queryItem, readSet_t *readSet);
 short outputBaseCovSingleQueryToFile(char *covFileName, baseCov_t *baseCovArray, int32_t arraySize);
 short outputCovReadsToFile(char *covReadsFileName, int32_t basePos, char base, query_t *queryItem, readSet_t *readSet);
-short computeDisagreements(int32_t *disagreeNum, int32_t *zeroCovNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t printFlag);
-short computeAbnormalCovRegNum(int32_t *highCovRegNum, int32_t *lowCovRegNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t arraySize, int32_t skipEndFlag);
+short computeRegCovSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, int32_t arraySize);
+short outputRegCovSingleQueryToFile(char *regCovFileName, baseCov_t *baseCovArray, int32_t arraySize);
+short computeDisagreements(int32_t *disagreeNum, int32_t *zeroCovNum, int32_t *disagreeRegSize, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, int32_t printFlag);
+short computeAbnormalCovRegNum(int32_t *highCovRegNum, int32_t *lowCovRegNum, baseCov_t *baseCovArray, int32_t startRow, int32_t endRow, query_t *queryItem, int32_t skipEndFlag, int32_t printFlag);
 short computeMisassFlagAlignSeg(int32_t *misassFlag, globalValidSeg_t *leftAlignSeg, globalValidSeg_t *rightAlignSeg, int32_t subjectLen, int32_t circularFlag);
 short getGapFlagMisInfo(int32_t *gapFlag, globalValidSeg_t *leftAlignSeg, globalValidSeg_t *rightAlignSeg, query_t *queryItem);
 short computeAlignSegMargin(int64_t *leftMargin, int64_t *rightMargin, globalValidSeg_t *leftAlignSeg, globalValidSeg_t *rightAlignSeg, int32_t difQuery, int32_t difSubject, query_t *queryItem, subject_t *subjectArray);
@@ -222,18 +224,13 @@ short reverseSeq(char *seq, int32_t seqLen);
 short computeSeqAlignment(char **pAlignResultArray, int32_t *overlapLen, int32_t *mismatchNum, int32_t *leftShiftLen1, int32_t *leftShiftLen2, int32_t *rightShiftLen1, int32_t *rightShiftLen2, char *seq1, char *seq2, int32_t seqLen1, int32_t seqLen2, int32_t printFlag);
 short computeRightMargin(int64_t *rightMargin, int64_t *rightMarginSubject, char **alignResultArray, int32_t overlapLen, int64_t leftQueryPos, int64_t rightQueryPos, int64_t leftSubjectPos, int64_t rightSubjectPos, int32_t queryLeftShiftLen, int32_t subjectLeftShiftLen, globalValidSeg_t *globalSeg);
 short computeLeftMargin(int64_t *leftMargin, int64_t *leftMarginSubject, char **alignResultArray, int32_t overlapLen, int64_t leftQueryPos, int64_t rightQueryPos, int64_t leftSubjectPos, int64_t rightSubjectPos, int32_t queryRightShiftLen, int32_t subjectRightShiftLen, globalValidSeg_t *globalSeg);
-short computeNormalRatios(double *SP_ratio, double *SMinus_ratio, double *SPlus_ratio, double *discorRatio, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
-short prepareRatioRegionArray(ratioRegion_t **ratioRegionArray, int32_t *maxRatioRegionNum, int32_t subRegSize, queryMatchInfo_t *queryMatchInfoSet);
-short computeNormalRatiosSingleQuery(ratioRegion_t *ratioRegionArray, int32_t *ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet);
 short computeBreakpointRatios(query_t *queryItem, int32_t misjoinNum, readSet_t *readSet);
-short initRatioRegionArrayNormal(ratioRegion_t *ratioRegionArray, int32_t *ratioRegionNum, int32_t subRegSize, query_t *queryItem);
 short initRatioRegionArrayBreakpoint(ratioRegion_t **ratioRegionArray, int32_t ratioRegionNum, query_t *queryItem);
-short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, query_t *queryItem, readSet_t *readSet);
-short computeAverRatios(double *SP_ratio, double *SMinus_ratio, double *SPlus_ratio, double *discorRatio, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
+short fillRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, query_t *queryItem, readSet_t *readSet, int32_t computeOtherMateFlag);
 short computeRatios(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
 short updateRatiosInQuery(query_t *queryItem, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
 void outputRatioRegionArray(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
-short determineMisassFlag(query_t *queryItem, int32_t misjoinRegNum, baseCov_t *baseCovArray, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres);
+short determineMisassFlag(query_t *queryItem, int32_t misjoinRegNum, baseCov_t *baseCovArray, readSet_t *readSet);
 short saveMisassQueries(char *errorsFile, char *svFile, char *misUncertainFile, char *gapFile, queryMatchInfo_t *queryMatchInfoSet);
 short saveNewQueries(char *newQueryFile, queryMatchInfo_t *queryMatchInfoSet);
 
@@ -303,6 +300,7 @@ short selectionSortMatchResults(alignMatchItem_t *matchResultArray, int32_t matc
 short radixSortMatchResults(alignMatchItem_t *matchResultArray, alignMatchItem_t *matchResultArrayBuf, int32_t itemNum);
 short outputQueryReadArray(char *outfile, queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet);
 short getUniqueMapFlag(int32_t *uniqueMapFlag, int64_t readID, readSet_t *readSet);
+short getPairedMatchInfo(readMatchInfo_t **pReadMatchInfoPaired, int64_t readID, readSet_t *readSet);
 
 // ================= indel.c ====================
 short determineQueryIndel(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet);
@@ -311,7 +309,9 @@ short computeFragSizeLeftRegQueryIndel(queryIndel_t *queryIndel, int32_t startQu
 short computeFragSizeRightRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet);
 short computeFragSizeBothRegQueryIndel(queryIndel_t *queryIndel, int32_t startQueryPosLeft, int32_t endQueryPosLeft, int32_t startQueryPosRight, int32_t endQueryPosRight, query_t *queryItem, readSet_t *readSet);
 short determineFinalQueryIndelKind(queryIndel_t *queryIndel, int32_t innerFlag, double insertSize, double standDev);
-short determineFinalQueryIndelKindUnmatched(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, double insertSize, double standDev, query_t *queryItem);
+short computeStatisticsRatioRegionQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, readSet_t *readSet, query_t *queryItem);
+short statisticsSummaryInRatioRegQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem);
+short determineFinalQueryIndelKindUnmatched(queryIndel_t *queryIndel);
 
 // ================= sv.c ====================
 short computeSVInQueries(queryMatchInfo_t *queryMatchInfoSet, readSetArr_t *readSetArray, int32_t threadNum);
@@ -329,7 +329,8 @@ short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratio
 short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem);
 short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet);
 short computeTotalDisagreeNum(int32_t *totalDisagreeNum, int32_t *totalZeroCovNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum);
-short getDiscordantRegNum(int32_t *discordantNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres);
+short getDiscordantRegNum(int32_t *discordantRegNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum);
+short getMultiReadsRegNum(int32_t *multiReadsRegNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum);
 
 // ================= misinfo.c ====================
 short getMisInfoList(query_t *queryItem, subject_t *subjectArray);
@@ -345,8 +346,8 @@ short adjustAlignmentGap(int32_t *gapNum1, int32_t *gapNum2, char **alignResultA
 short isValidAlignment(int32_t *validAlignFlag, int32_t *validTailAlignFlag, char **alignResultArray, int32_t overlapLen, int32_t queryLeftShiftLen, int32_t subjectLeftShiftLen, int32_t allowLeftShiftFlag);
 short addInnerIndelToMisInfoList(query_t *queryItem, int32_t startAlignQueryPos, int32_t startAlignSubjectPos, int32_t subjectID, int32_t strand, char **alignResultArray, int32_t overlapLen, int32_t queryAlignSeqLen, int32_t subjectAlignSeqLen, int32_t queryLeftShiftLen, int32_t subjectLeftShiftLen, int32_t queryRightShiftLen, int32_t subjectRightShiftLen, int32_t gapNumQuery, int32_t gapNumSubject);
 short addNewQueryMisInfoNode(query_t *queryItem, int32_t leftSegRow, int32_t rightSegRow, int32_t queryMisInfoType, int32_t queryIndelKind, int32_t gapFlag, int32_t innerFlag, int32_t leftMarginQueryPos, int32_t rightMarginQueryPos, int32_t leftMarginSubjectPos, int32_t rightMarginSubjectPos, int32_t subjectID, int32_t difQuery, int32_t difSubject);
-short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres);
-short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres);
+short determineMisInfoSingleQuery(query_t *queryItem, subject_t *subjectArray, readSet_t *readSet);
+short computeMisjoinSingleQuery(query_t *queryItem, baseCov_t *baseCovArray, subject_t *subjectArray, readSet_t *readSet);
 short determineQueryMis(query_t *queryItem);
 short outputMisInfoList(query_t *queryItem);
 
@@ -369,10 +370,9 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 short generateCircosQueryData(char *queryFileCircos, queryMatchInfo_t *queryMatchInfoSet);
 short fillBaseCovCircosDataSingleQuery(FILE *fpCovData, FILE *fpZeroCov, char *queryLabel, baseCov_t *baseCovArray, int32_t arraySize);
 short generateCircosDisNumSingleQuery(FILE *fpQueryDisNum, char *queryLabel, baseCov_t *baseCovArray, int32_t arraySize);
-short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorCov, /*FILE *fpOrphanedCov, FILE *fpSPRatio, FILE *fpSMinusRatio, FILE *fpSPlusRatio,*/ FILE *fpMultiRatio, char *queryLabel, query_t *queryItem, readSet_t *readSet);
+short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorRatio, FILE *fpMultiRatio, char *queryLabel, query_t *queryItem, readSet_t *readSet);
 short initRatioRegArrayCircos(ratioRegion_t **ratioRegionArray, int32_t *ratioRegionNum, int32_t subRegSize, query_t *queryItem);
-short outputCircosHeatmapSingleQuery(FILE *fpDiscorCov, /*FILE *fpOrphanedCov,*/ FILE *fpMultiRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
-short outputCircosRatiosSingleQuery(FILE *fpSPRatio, FILE *fpSMinusRatio, FILE *fpSPlusRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
+short outputCircosHeatmapSingleQuery(FILE *fpDiscorRatio, FILE *fpMultiRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum);
 short generateResultCircosDataSingleQuery(FILE *fpResult, char *queryLabel, query_t *queryItem);
 
 // ================= util.c ====================

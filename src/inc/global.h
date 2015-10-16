@@ -21,6 +21,7 @@ char queryMatchInfoFile[256];
 
 char newQueryFile[256];
 
+int32_t singleCellFlag;					// default is 0. 0 -- non single-cell data; 1 -- single-cell data
 int32_t minQueryLenThres;				// default 100
 int32_t shortQueryLenThres;				// default 200
 double matchPercentThres;				// default 0.95
@@ -66,9 +67,6 @@ uint64_t *pReadseqTmpDoing;
 
 readseqHashItemBlock_t *pReadseqHashItemBlockTmp;
 readseqHashItem_t *pReadseqHashItemTmpDoing;
-
-double SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres;
-double discorRatio_Thres;
 
 
 #endif /* GLOBAL_H_ */

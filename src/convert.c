@@ -1145,6 +1145,7 @@ short loadQueryMatchInfoFromFile(queryMatchInfo_t **queryMatchInfoSet, char *que
 		}
 
 		(*queryMatchInfoSet)->queryArray[i].querySeq = NULL;
+		(*queryMatchInfoSet)->queryArray[i].subRegSize = REG_COV_SIZE_THRES;
 	}
 
 	// read the match items

@@ -163,10 +163,10 @@ short computeSVInQueriesSingleThread(threadPara_t *threadPara)
 		if(i%validThreadNum==threadID && (queryArray[i].misassFlag==UNCERTAIN_MISASS || queryArray[i].misassFlag==TRUE_MISASS))
 		{
 			// ########################### Debug information ##############################
-//			if(queryArray[i].queryID==219 || strcmp(queryArray[i].queryTitle, "scf7180000014037")==0)
-//			{
-//				printf("------ queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
-//			}
+			//if(queryArray[i].queryID==21900 || strcmp(queryArray[i].queryTitle, "scf7180000614599")==0)
+			//{
+			//	printf("------ queryID=%d, queryTitle=%s, queryLen=%d, subjectNum=%d\n", queryArray[i].queryID, queryArray[i].queryTitle, queryArray[i].queryLen, queryArray[i].querySubjectNum);
+			//}
 			// ########################### Debug information ##############################
 
 			// compute the structural variations in single query
@@ -351,8 +351,8 @@ short checkSVRegMisjoin(queryMargin_t *queryMargin, baseCov_t *baseCovArray, que
 		return FAILED;
 	}
 
-	// compute disagreements, S/P, S-/SL, S+/SR, insert size for each sub-region
-	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
+	// compute disagreements, discordantNum, insert size for each sub-region
+	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -449,8 +449,8 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
 		return FAILED;
 	}
 
-	// compute disagreements, S/P, S-/SL, S+/SR, insert size for each sub-region
-	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
+	// compute disagreements, insert size for each sub-region
+	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -485,7 +485,7 @@ short checkSVRegQueryIndel(queryIndel_t *queryIndel, baseCov_t *baseCovArray, qu
 	if(ratioRegionNum>0)
 		free(ratioRegionArray);
 	else
-		printf("ratioRegionNu=%d\n", ratioRegionNum);
+		printf("ratioRegionNum=%d\n", ratioRegionNum);
 
 	return SUCCESSFUL;
 }
@@ -526,10 +526,6 @@ short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioReg
 
 		(*ratioRegionArray)[itemNum].disagreeNum = 0;
 		(*ratioRegionArray)[itemNum].zeroCovNum = 0;
-
-		(*ratioRegionArray)[itemNum].SPRatio = -1;
-		(*ratioRegionArray)[itemNum].singleMinusRatio = -1;
-		(*ratioRegionArray)[itemNum].singlePlusRatio = -1;
 		itemNum ++;
 	}
 
@@ -549,7 +545,7 @@ short initRatioRegQueryIndel(ratioRegion_t **ratioRegionArray, int32_t *ratioReg
  */
 short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, baseCov_t *baseCovArray, int32_t printFlag)
 {
-	int32_t i, startRow, endRow;
+	int32_t i, startRow, endRow, disagreeRegSize;
 
 	// compute the disagreements
 	for(i=0; i<ratioRegionNum; i++)
@@ -564,7 +560,7 @@ short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratio
 		else
 			endRow = ratioRegionArray[i].endQPosLHalf - 1;
 
-		if(computeDisagreements(&ratioRegionArray[i].disagreeNum, &ratioRegionArray[i].zeroCovNum, baseCovArray, startRow, endRow, printFlag)==FAILED)
+		if(computeDisagreements(&ratioRegionArray[i].disagreeNum, &ratioRegionArray[i].zeroCovNum, &disagreeRegSize, baseCovArray, startRow, endRow, printFlag)==FAILED)
 		{
 			printf("line=%d, In %s(), cannot compute the disagreements, error!\n", __LINE__, __func__);
 			return FAILED;
@@ -581,7 +577,7 @@ short computeDisagreeNumRatioRegs(ratioRegion_t *ratioRegionArray, int32_t ratio
  */
 short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem)
 {
-	int32_t totalDisagreeNum, totalZeroCovNum, discordantNum, headSkipRegNum, tailSkipRegNum;
+	int32_t totalDisagreeNum, totalZeroCovNum, discordantRegNum, headSkipRegNum, tailSkipRegNum;
 
 	headSkipRegNum = 0;
 	tailSkipRegNum = 0;
@@ -594,18 +590,18 @@ short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionA
 	}
 
 	// get discordant region count
-	if(getDiscordantRegNum(&discordantNum, ratioRegionArray, ratioRegionNum, headSkipRegNum, tailSkipRegNum, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
+	if(getDiscordantRegNum(&discordantRegNum, ratioRegionArray, ratioRegionNum, headSkipRegNum, tailSkipRegNum)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the discordant region count, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
 
-	if(totalDisagreeNum>=3 || totalZeroCovNum>0 || discordantNum>=1)
+	if(totalDisagreeNum>=3 || totalZeroCovNum>0 || discordantRegNum>=1)
 		queryMargin->misassFlag = UNCERTAIN_MISASS;
 	else
 		queryMargin->misassFlag = STRUCTURE_VARIATION;
 
-	//printf("misjoin reg[%d, %d]: misassFlag=%d, totalDisagreeNum=%d, totalZeroCovNum=%d, discordantNum=%d\n", queryMargin->leftMargin, queryMargin->rightMargin, queryMargin->misassFlag, totalDisagreeNum, totalZeroCovNum, discordantNum);
+	//printf("misjoin reg[%d, %d]: misassFlag=%d, totalDisagreeNum=%d, totalZeroCovNum=%d, discordantRegNum=%d\n", queryMargin->leftMargin, queryMargin->rightMargin, queryMargin->misassFlag, totalDisagreeNum, totalZeroCovNum, discordantRegNum);
 
 	return SUCCESSFUL;
 }
@@ -617,7 +613,7 @@ short determineSVMisjoin(queryMargin_t *queryMargin, ratioRegion_t *ratioRegionA
  */
 short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t subRegSize, query_t *queryItem, readSet_t *readSet)
 {
-	int32_t totalDisagreeNum, totalZeroCovNum, discordantNum, headSkipRegNum, tailSkipRegNum;
+	int32_t totalDisagreeNum, totalZeroCovNum, discordantRegNum, headSkipRegNum, tailSkipRegNum;
 	int32_t startQueryPosLeft, endQueryPosLeft, startQueryPosRight, endQueryPosRight;
 	double insertSize, standDev, difFragSize;
 
@@ -649,7 +645,7 @@ short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegion
 	}
 
 	// get discordant region count
-	if(getDiscordantRegNum(&discordantNum, ratioRegionArray, ratioRegionNum, headSkipRegNum, tailSkipRegNum, SP_ratio_Thres, SMinus_ratio_Thres, SPlus_ratio_Thres)==FAILED)
+	if(getDiscordantRegNum(&discordantRegNum, ratioRegionArray, ratioRegionNum, headSkipRegNum, tailSkipRegNum)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot compute the discordant region count, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -687,20 +683,20 @@ short determineSVQueryIndel(queryIndel_t *queryIndel, ratioRegion_t *ratioRegion
 		difFragSize = 0;
 	}
 
-	if(totalZeroCovNum>0 || discordantNum>=1 || (difFragSize>2*standDev || difFragSize>0.2*insertSize))
+	if((totalZeroCovNum>0 || discordantRegNum>0) && (difFragSize>2*standDev || difFragSize>0.2*insertSize))
 		queryIndel->misassFlag = UNCERTAIN_MISASS;
 	else if(totalDisagreeNum>0)
 	{
 		if(totalDisagreeNum>=2)
 			queryIndel->misassFlag = UNCERTAIN_MISASS;
-		else if(totalDisagreeNum==1 && (endQueryPosRight-startQueryPosLeft+1)<1000)
+		else if(totalDisagreeNum==1 && queryIndel->disagreeRegSize<300 && (totalZeroCovNum>0 || discordantRegNum>0))
 			queryIndel->misassFlag = UNCERTAIN_MISASS;
 		else
 			queryIndel->misassFlag = STRUCTURE_VARIATION;
 	}else
 		queryIndel->misassFlag = STRUCTURE_VARIATION;
 
-	//printf("indel reg[%d, %d]: misassFlag=%d, totalDisagreeNum=%d, totalZeroCovNum=%d, discordantNum=%d, difFragSize=%.4f\n", queryIndel->leftMargin, queryIndel->rightMargin, queryIndel->misassFlag, totalDisagreeNum, totalZeroCovNum, discordantNum, difFragSize);
+	//printf("indel reg[%d, %d]: misassFlag=%d, totalDisagreeNum=%d, totalZeroCovNum=%d, discordantRegNum=%d, difFragSize=%.4f\n", queryIndel->leftMargin, queryIndel->rightMargin, queryIndel->misassFlag, totalDisagreeNum, totalZeroCovNum, discordantRegNum, difFragSize);
 
 	return SUCCESSFUL;
 }
@@ -750,12 +746,12 @@ short computeTotalDisagreeNum(int32_t *totalDisagreeNum, int32_t *totalZeroCovNu
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short getDiscordantRegNum(int32_t *discordantNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum, double SP_ratio_Thres, double SMinus_ratio_Thres, double SPlus_ratio_Thres)
+short getDiscordantRegNum(int32_t *discordantRegNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum)
 {
 	int32_t i, startRow, endRow, tmp;
 	ratioRegion_t *subReg;
 
-	*discordantNum = 0;
+	*discordantRegNum = 0;
 
 	startRow = headSkipRegNum;
 	endRow = ratioRegionNum - tailSkipRegNum - 1;
@@ -776,18 +772,53 @@ short getDiscordantRegNum(int32_t *discordantNum, ratioRegion_t *ratioRegionArra
 		return FAILED;
 	}
 
-	if(startRow>0 && endRow<ratioRegionNum-1)
+	for(i=startRow; i<=endRow; i++)
 	{
-		for(i=startRow; i<=endRow; i++)
-		{
-			subReg = ratioRegionArray + i;
-			if(subReg->singleNum>=3 && (subReg->SPRatio>SP_ratio_Thres*3 || (subReg->singleNumLeftHalf>=3 && subReg->singleMinusRatio>0.7 && subReg->singleNumRightHalf>=3 && subReg->singlePlusRatio>0.7)))
-			{
-				(*discordantNum) ++;
-			}
-		}
+		subReg = ratioRegionArray + i;
+		if(subReg->discorNum>=3 && subReg->discorRatio>0.1)
+			(*discordantRegNum) ++;
 	}
 
 	return SUCCESSFUL;
 }
 
+/**
+ * Get the multiple aligned sub-region count for query indel.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getMultiReadsRegNum(int32_t *multiReadsRegNum, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum, int32_t headSkipRegNum, int32_t tailSkipRegNum)
+{
+	int32_t i, startRow, endRow, tmp;
+	ratioRegion_t *subReg;
+
+	*multiReadsRegNum = 0;
+
+	startRow = headSkipRegNum;
+	endRow = ratioRegionNum - tailSkipRegNum - 1;
+	if(startRow>=ratioRegionNum)
+		startRow = ratioRegionNum - 1;
+	if(endRow<0)
+		endRow = 0;
+	if(startRow>endRow)
+	{
+		tmp = startRow;
+		startRow = endRow;
+		endRow = tmp;
+	}
+
+	if(startRow<0 || endRow>=ratioRegionNum)
+	{
+		printf("line=%d, In %s(), startRow=%d, endRow=%d, ratioRegionNum=%d, error!\n", __LINE__, __func__, startRow, endRow, ratioRegionNum);
+		return FAILED;
+	}
+
+	for(i=startRow; i<=endRow; i++)
+	{
+		subReg = ratioRegionArray + i;
+		if(subReg->multiReadsRatio>0.05)
+			(*multiReadsRegNum) ++;
+	}
+
+	return SUCCESSFUL;
+}

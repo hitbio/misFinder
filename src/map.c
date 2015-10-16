@@ -424,7 +424,7 @@ short createThreadsMap(pthread_t *threadArray, threadPara_t *threadParaArray, in
  */
 void mapReadsOpSingleThread(threadPara_t *threadPara)
 {
-	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2], autoMismatchNumThreshold;
+	int32_t i, j, k, seqLen, maxArraySize, *matchItemNum, matchItemNums[2], autoMismatchThreshold;
 	readBlock_t *pReadBlockArray;
 	read_t *pRead, *pReadArray;
 	uint64_t rid, tmpRid, *readSeqInt, *readSeqIntRev;
@@ -505,12 +505,12 @@ void mapReadsOpSingleThread(threadPara_t *threadPara)
 		{
 			pRead = pReadArray + j;
 			seqLen = pRead->seqlen;
-			autoMismatchNumThreshold = seqLen * 0.05;
+			autoMismatchThreshold = seqLen * 0.05;
 
-//			if(rid==1918838 || rid==1565684)
-//			{
-//				printf("rid=%ld, seqLen=%d\n", rid, seqLen);
-//			}
+			//if(rid==31722926)
+			//{
+			//	printf("rid=%ld, seqLen=%d\n", rid, seqLen);
+			//}
 
 			if(rid%2==1)
 			{
@@ -526,7 +526,7 @@ void mapReadsOpSingleThread(threadPara_t *threadPara)
 			if(pRead->validFlag==YES && (uniqueMapOpFlag==YES || (uniqueMapOpFlag==NO && pRead->successMapFlag==NO)))
 			{
 				// map single read
-				if(mapSingleReadToQueries(rid, pRead, readSet, matchResultArray, matchResultArrayBuf1, matchResultArrayBuf2, matchItemNum, queryIndex, queryMatchInfoSet->queryArray, autoMismatchNumThreshold)==FAILED)
+				if(mapSingleReadToQueries(rid, pRead, readSet, matchResultArray, matchResultArrayBuf1, matchResultArrayBuf2, matchItemNum, queryIndex, queryMatchInfoSet->queryArray, autoMismatchThreshold)==FAILED)
 				{
 					printf("line=%d, In %s(), cannot map the read %lu, error!\n", __LINE__, __func__, rid);
 					return;
@@ -737,7 +737,7 @@ short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readS
 	uint64_t rid;
 	alignMatchItem_t *matchResultArray, *matchResultArrays[2], *matchResultArrayBuf1, *matchResultArrayBuf2;
 	double insertSizeTmp, standDevTmp, fragSizeSum, fragSize, fragDif, fragDifSum;
-	int32_t pairNum, pairNumTmp, pairNumEnoughFlag, uniqueMapOpFlag;
+	int32_t pairNum, pairNumTmp, pairNumMax, pairNumEnoughFlag, uniqueMapOpFlag;
 
 	// the match result array
 	if(getMaxArraySizeFromQueryIndex(&maxArraySize, queryIndex)==FAILED)
@@ -762,12 +762,15 @@ short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readS
 	}
 
 	// estimate the insert size and standard deviation
-	fragSizeSum = 0;
-	pairNum = 0;
+
 	uniqueMapOpFlag = YES;
+	pairNumMax = 2000;
 
 	for(k=0; k<2; k++)
 	{
+		fragSizeSum = 0;
+		pairNum = 0;
+
 		pairNumTmp = 0;
 		fragDifSum = 0;
 		pairNumEnoughFlag = NO;
@@ -822,13 +825,18 @@ short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readS
 								if(k==0)
 								{
 									fragSizeSum += fragSize;
+									pairNumTmp ++;
 								}else
 								{
-									fragDif = (fragSize - insertSizeTmp) * (fragSize - insertSizeTmp);
-									fragDifSum += fragDif;
+									if(fragSize<2*insertSizeTmp)
+									{
+										fragDif = (fragSize - insertSizeTmp) * (fragSize - insertSizeTmp);
+										fragDifSum += fragDif;
+										pairNumTmp ++;
+									}
 								}
-								pairNumTmp ++;
-								if(pairNumTmp>=2000)
+
+								if(pairNumTmp>=pairNumMax)
 								{
 									pairNumEnoughFlag = YES;
 									break;
@@ -846,22 +854,21 @@ short estimateInsertSizeSingleReadset(queryMatchInfo_t *queryMatchInfoSet, readS
 		if(k==0)
 		{
 			if(pairNumTmp>0)
-			{
-				pairNum = pairNumTmp;
-				insertSizeTmp = fragSizeSum / pairNum;
-			}else
+				insertSizeTmp = fragSizeSum / pairNumTmp;
+			else
 			{
 				printf("line=%d, In %s(), no valid paired reads for computing insert size of library, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
 		}else
 		{
-			if(pairNumTmp!=pairNum)
+			if(pairNumTmp>0)
+				standDevTmp = sqrt((fragDifSum) / pairNumTmp);
+			else
 			{
-				printf("line=%d, In %s(), cannot compute insert size of library, error!\n", __LINE__, __func__);
+				printf("line=%d, In %s(), no valid paired reads for computing insert size of library, error!\n", __LINE__, __func__);
 				return FAILED;
 			}
-			standDevTmp = sqrt((fragDifSum) / pairNum);
 		}
 	}
 
@@ -1227,7 +1234,9 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 	queryKmer_t *kmer;
 	char *querySeq, readSeq[MAX_READ_LEN_IN_BUF+1];
 	int32_t queryID, queryLen, queryPos, maxStartBasePos, remainBaseNum, misNum, startCmpRpos, startCmpQpos;
+	int32_t startCmpRposLeft, startCmpQposLeft, startCmpRposRight, startCmpQposRight, remainBaseNumLeft, remainBaseNumRight;
 	int32_t startAlignReadPos, endAlignReadPos, startAlignQueryPos, queryEndIgnoreLen, shiftBaseNum;
+	int32_t headSkipBaseNumRead, tailSkipBaseNumRead;
 
 	entriesNumRead = ((seqLen - 1) >> 5) + 1;
 	baseNumLastEntryRead = ((seqLen - 1) % 32) + 1;
@@ -1293,17 +1302,20 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 
 							if(processedFlag==NO)
 							{
-								// mismatch on right side
+								// mismatch on the right side
 								misNum = 0;
-								startCmpRpos = startBasePos + queryIndex->kmerSize;
-								startCmpQpos = queryPos + queryIndex->kmerSize - 1;
-								if(queryLen-startCmpQpos<seqLen-startCmpRpos)
-									remainBaseNum = queryLen - startCmpQpos;
+
+								startCmpRposRight = startBasePos + queryIndex->kmerSize;
+								startCmpQposRight = queryPos + queryIndex->kmerSize - 1;
+								if(queryLen-startCmpQposRight<seqLen-startCmpRposRight)
+									remainBaseNumRight = queryLen - startCmpQposRight;
 								else
-									remainBaseNum = seqLen - startCmpRpos;
-								for(j=0; j<remainBaseNum; j++)
+									remainBaseNumRight = seqLen - startCmpRposRight;
+
+								// compute the mismatches on the right side
+								for(j=0; j<remainBaseNumRight; j++)
 								{
-									if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+									if(readSeq[startCmpRposRight+j]!=querySeq[startCmpQposRight+j])
 									{
 										misNum ++;
 										if(misNum>mismatchNumThreshold)
@@ -1311,21 +1323,32 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 									}
 								}
 
-								// mismatch on left side
-								startCmpRpos = startAlignReadPos - 1;
+								// compute the skip mismatched bases at the head of the read
+								tailSkipBaseNumRead = 0;
+								for(j=remainBaseNumRight-1; j>=0; j--)
+								{
+									if(readSeq[startCmpRposRight+j]!=querySeq[startCmpQposRight+j])
+										tailSkipBaseNumRead ++;
+									else
+										break;
+								}
+
+								// mismatch on the left side
+								startCmpRposLeft = startAlignReadPos - 1;
 								if(startAlignReadPos==1)
 								{
-									startCmpQpos = queryPos - startBasePos - 1;
-									remainBaseNum = startBasePos;
+									startCmpQposLeft = queryPos - startBasePos - 1;
+									remainBaseNumLeft = startBasePos;
 								}else
 								{
-									startCmpQpos = 0;
-									remainBaseNum = startBasePos + 1 - startAlignReadPos;
+									startCmpQposLeft = 0;
+									remainBaseNumLeft = startBasePos + 1 - startAlignReadPos;
 								}
 
-								for(j=0; j<remainBaseNum; j++)
+								// compute the mismatches on the left side
+								for(j=0; j<remainBaseNumLeft; j++)
 								{
-									if(readSeq[startCmpRpos+j]!=querySeq[startCmpQpos+j])
+									if(readSeq[startCmpRposLeft+j]!=querySeq[startCmpQposLeft+j])
 									{
 										misNum ++;
 										if(misNum>mismatchNumThreshold)
@@ -1333,6 +1356,17 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 									}
 								}
 
+								// compute the skip mismatched bases at the head of the read
+								headSkipBaseNumRead = 0;
+								for(j=0; j<remainBaseNumLeft; j++)
+								{
+									if(readSeq[startCmpRposLeft+j]!=querySeq[startCmpQposLeft+j])
+										headSkipBaseNumRead ++;
+									else
+										break;
+								}
+
+								// save the match result to matchResultArray
 								if(misNum<=mismatchNumThreshold)
 								{ // add the match information
 									matchResultArray[*matchItemNum].queryID = queryID;
@@ -1341,6 +1375,8 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 									matchResultArray[*matchItemNum].startReadPos = startAlignReadPos;
 									matchResultArray[*matchItemNum].alignSize = endAlignReadPos - startAlignReadPos + 1;
 									matchResultArray[*matchItemNum].orientation = orientation;
+									matchResultArray[*matchItemNum].headSkipNum = headSkipBaseNumRead;
+									matchResultArray[*matchItemNum].tailSkipNum = tailSkipBaseNumRead;
 									matchResultArray[*matchItemNum].validFlag = YES;
 									(*matchItemNum) ++;
 								}
@@ -1349,6 +1385,26 @@ short getMatchedQueryPosWithMismatch(alignMatchItem_t *matchResultArray, int32_t
 					}
 				}
 			}
+		}
+	}
+
+	// adjust the startReadPos according to headSkipNum and tailSkipNum
+	for(i=0; i<*matchItemNum; i++)
+	{
+		if(matchResultArray[i].headSkipNum>0)
+		{
+			matchResultArray[i].startReadPos += matchResultArray[i].headSkipNum;
+			matchResultArray[i].queryPos += matchResultArray[i].headSkipNum;
+			matchResultArray[i].mismatchNum -= matchResultArray[i].headSkipNum;
+			matchResultArray[i].alignSize -= matchResultArray[i].headSkipNum;
+			matchResultArray[i].headSkipNum = -1;
+		}
+
+		if(matchResultArray[i].tailSkipNum>0)
+		{
+			matchResultArray[i].mismatchNum -= matchResultArray[i].tailSkipNum;
+			matchResultArray[i].alignSize -= matchResultArray[i].tailSkipNum;
+			matchResultArray[i].tailSkipNum = -1;
 		}
 	}
 
@@ -2938,6 +2994,32 @@ short getUniqueMapFlag(int32_t *uniqueMapFlag, int64_t readID, readSet_t *readSe
 		*uniqueMapFlag = pRead->uniqueMapFlag;
 	else
 		*uniqueMapFlag = -1;
+
+	return SUCCESSFUL;
+}
+
+/**
+ * Get the paired read match information of a read.
+ *  @return:
+ *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
+ */
+short getPairedMatchInfo(readMatchInfo_t **pReadMatchInfoPaired, int64_t readID, readSet_t *readSet)
+{
+	readMatchInfoBlock_t *readMatchInfoBlockArr;
+	int32_t readMatchInfoBlockID, rowNumInReadMatchInfoBlock, maxItemNumPerReadMatchInfoBlock;
+	int64_t readID_paired;
+
+	readMatchInfoBlockArr = readSet->readMatchInfoBlockArr;
+	maxItemNumPerReadMatchInfoBlock = readSet->maxItemNumPerReadMatchInfoBlock;
+
+	if(readID%2==1)
+		readID_paired = readID + 1;
+	else
+		readID_paired = readID - 1;
+
+	readMatchInfoBlockID = (readID_paired - 1) / maxItemNumPerReadMatchInfoBlock;
+	rowNumInReadMatchInfoBlock = (readID_paired - 1) % maxItemNumPerReadMatchInfoBlock;
+	*pReadMatchInfoPaired = readMatchInfoBlockArr[readMatchInfoBlockID].readMatchInfoArr + rowNumInReadMatchInfoBlock;
 
 	return SUCCESSFUL;
 }

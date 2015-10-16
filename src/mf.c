@@ -17,7 +17,7 @@
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara)
+int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara, int32_t singleCellFlagPara)
 {
 	struct timeval tp_start,tp_end;
 	double time_used;
@@ -25,7 +25,7 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *conf
 
 
 	// initialize the global parameters
-	if(initGlobalParas(operationMode, outputPathName, configFilePara, minQueryLenThreshold, matchPercentThreshold, threadNumPara, indelSizeThresPara)==FAILED)
+	if(initGlobalParas(operationMode, outputPathName, configFilePara, minQueryLenThreshold, matchPercentThreshold, threadNumPara, indelSizeThresPara, singleCellFlagPara)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot initialize the global parameters, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -119,7 +119,7 @@ int computeGlobalMetrics(int32_t operationMode, char *outputPathName, char *conf
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise return FAILED.
  */
-short initGlobalParas(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara)
+short initGlobalParas(int32_t operationMode, char *outputPathName, char *configFilePara, int minQueryLenThreshold, double matchPercentThreshold, int32_t threadNumPara, int32_t indelSizeThresPara, int32_t singleCellFlagPara)
 {
 	// global paths and file names
 	if(setGlobalPath(outputPathName)==FAILED)
@@ -173,24 +173,16 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *configF
 
 	// global variables
 	if(minQueryLenThreshold>0)
-	{
 		minQueryLenThres = minQueryLenThreshold;
-	}else
-	{
+	else
 		minQueryLenThres = MIN_QUERY_LEN_THRES;
-		printf("The minimal contig size will be set to be %d bp by default.\n", minQueryLenThres);
-	}
 
 	shortQueryLenThres = SHORT_QUERY_LEN_THRES;
 
 	if(matchPercentThreshold>0)
-	{
 		matchPercentThres = matchPercentThreshold;
-	}else
-	{
+	else
 		matchPercentThres = MATCHED_PERCENT_THRES;
-		printf("The matched percent threshold will be set to be %.2f by default.\n", matchPercentThres);
-	}
 
 	matchPercentFactor = MATCH_PERCENT_FACTOR;
 	varyEndLenThres = VARY_LEN_THRES;
@@ -200,10 +192,12 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *configF
 	if(indelSizeThresPara>0)
 		indelSizeThres = indelSizeThresPara;
 	else
-	{
 		indelSizeThres = INDEL_SIZE_DEFAULT;
-		printf("The minimal indel size will be set to be %d bp by default.\n", INDEL_SIZE_DEFAULT);
-	}
+
+	if(singleCellFlagPara==1)
+		singleCellFlag = YES;
+	else
+		singleCellFlag = NO;
 
 	if(threadNumPara>0)
 	{
@@ -221,9 +215,14 @@ short initGlobalParas(int32_t operationMode, char *outputPathName, char *configF
 		}
 	}
 
+	printf("Minimal contig size     : %d\n", minQueryLenThres);
+	printf("Match percent threshold : %.2f\n", matchPercentThres);
+	printf("Minimal indel size      : %d\n", indelSizeThres);
+	printf("Single-cell data flag   : %d\n", singleCellFlag);
+	printf("Thread number           : %d\n", threadNum);
+
 	return SUCCESSFUL;
 }
-
 
 /**
  * Set the global input and output path directory.
@@ -750,7 +749,7 @@ short outputConfigInfo(int32_t operationMode, char *inputQueryFileInit, char *su
 	char fileNameTmp[LINE_CHAR_MAX+1];
 	readFile_t *readFileNode;
 
-	printf("\nConfiguration information:\n");
+	printf("\nConfigurations:\n");
 
 	// check the query and subjects file names
 	if(operationMode==OPERATION_MODE_ALL || operationMode==OPERATION_MODE_MERGE || operationMode==OPERATION_MODE_METRICS)

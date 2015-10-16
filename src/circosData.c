@@ -21,12 +21,10 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 	baseCov_t *baseCovArray;
 	char newQueryLabel[256];
 	char queryFileCircos[256], covFileCircos[256], disagreeFileCircos[256];
-	char zeroCovFileCircos[256], discorFileCircos[256]/*, orphanedCovFileCircos[256]*/;
-	//char SPRatioFileCircos[256], SMinusRatioFileCircos[256], SPlusRatioFileCircos[256];
+	char zeroCovFileCircos[256], discorFileCircos[256];
 	char multiRatioFileCircos[256], resultFileCircos[256];
-	FILE *fpQueryCovData, *fpQueryDisNum, *fpZeroCov, *fpDiscorCov/*, *fpOrphanedCov*/;
-	//FILE *fpSPRatio, *fpSMinusRatio, *fpSPlusRatio;
-	FILE *fpMultiRatio, *fpResult;
+	FILE *fpQueryCovData, *fpQueryDisNum, *fpZeroCov;
+	FILE *fpMultiRatio, *fpDiscorRatio, *fpResult;
 
 	strcpy(queryFileCircos, outputPathStr);
 	strcat(queryFileCircos, "circos_queries.txt");
@@ -38,20 +36,7 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 	strcat(zeroCovFileCircos, "circos_zeroCov.txt");
 
 	strcpy(discorFileCircos, outputPathStr);
-	strcat(discorFileCircos, "circos_discorCov.txt");
-/*
-	strcpy(orphanedCovFileCircos, outputPathStr);
-	strcat(orphanedCovFileCircos, "circos_orphanedCov.txt");
-
-	strcpy(SPRatioFileCircos, outputPathStr);
-	strcat(SPRatioFileCircos, "circos_SPRatio.txt");
-
-	strcpy(SMinusRatioFileCircos, outputPathStr);
-	strcat(SMinusRatioFileCircos, "circos_SMinusRatio.txt");
-
-	strcpy(SPlusRatioFileCircos, outputPathStr);
-	strcat(SPlusRatioFileCircos, "circos_SPlusRatio.txt");
-*/
+	strcat(discorFileCircos, "circos_discorRatio.txt");
 
 	strcpy(multiRatioFileCircos, outputPathStr);
 	strcat(multiRatioFileCircos, "circos_multiRatio.txt");
@@ -73,45 +58,16 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 	fpZeroCov = fopen (zeroCovFileCircos, "w");
 	if(fpZeroCov==NULL)
 	{
-		printf("line=%d, In %s(), cannot create circos query file [%s], error!\n", __LINE__, __func__, zeroCovFileCircos);
+		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, zeroCovFileCircos);
 		return FAILED;
 	}
 
-	fpDiscorCov = fopen (discorFileCircos, "w");
-	if(fpDiscorCov==NULL)
+	fpDiscorRatio = fopen (discorFileCircos, "w");
+	if(fpDiscorRatio==NULL)
 	{
-		printf("line=%d, In %s(), cannot create circos query file [%s], error!\n", __LINE__, __func__, discorFileCircos);
+		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, discorFileCircos);
 		return FAILED;
 	}
-/*
-	fpOrphanedCov = fopen (orphanedCovFileCircos, "w");
-	if(fpOrphanedCov==NULL)
-	{
-		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, orphanedCovFileCircos);
-		return FAILED;
-	}
-
-	fpSPRatio = fopen (SPRatioFileCircos, "w");
-	if(fpSPRatio==NULL)
-	{
-		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, SPRatioFileCircos);
-		return FAILED;
-	}
-
-	fpSMinusRatio = fopen (SMinusRatioFileCircos, "w");
-	if(fpSMinusRatio==NULL)
-	{
-		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, SMinusRatioFileCircos);
-		return FAILED;
-	}
-
-	fpSPlusRatio = fopen (SPlusRatioFileCircos, "w");
-	if(fpSPlusRatio==NULL)
-	{
-		printf("line=%d, In %s(), cannot create file [%s], error!\n", __LINE__, __func__, SPlusRatioFileCircos);
-		return FAILED;
-	}
-*/
 
 	fpMultiRatio = fopen (multiRatioFileCircos, "w");
 	if(fpMultiRatio==NULL)
@@ -146,11 +102,14 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 		queryItem = queryMatchInfoSet->queryArray + i;
 		queryLen = queryItem->queryLen;
 
-//		if(queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
+		// data for ecoli
+//		if(queryItem->queryID==1 || queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
 //			|| queryItem->queryID==28 || queryItem->queryID==36 || queryItem->queryID==38
 //			|| queryItem->queryID==41 || queryItem->queryID==42 || queryItem->queryID==43 || queryItem->queryID==45 || queryItem->queryID==46
 //			|| queryItem->queryID==47 || queryItem->queryID==54 || queryItem->queryID==56 || queryItem->queryID==60
 //			|| queryItem->queryID==61 || queryItem->queryID==64 || queryItem->queryID==67 || queryItem->queryID==71)
+
+		// data for spombe
 		if(strcmp(queryItem->queryTitle, "scf7180000013910")==0 || strcmp(queryItem->queryTitle, "scf7180000013931")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000013975")==0 || strcmp(queryItem->queryTitle, "scf7180000014158")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000014214")==0 || strcmp(queryItem->queryTitle, "scf7180000014218")==0
@@ -197,8 +156,7 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 			}
 
 			// generate coverage of discordant reads data
-			//if(generateCircosHeatmapAndRatioDataSingleQuery(fpDiscorCov, fpOrphanedCov, fpSPRatio, fpSMinusRatio, fpSPlusRatio, newQueryLabel, queryItem, readSet)==FAILED)
-			if(generateCircosHeatmapAndRatioDataSingleQuery(fpDiscorCov, fpMultiRatio, newQueryLabel, queryItem, readSet)==FAILED)
+			if(generateCircosHeatmapAndRatioDataSingleQuery(fpDiscorRatio, fpMultiRatio, newQueryLabel, queryItem, readSet)==FAILED)
 			{
 				printf("line=%d, In %s(), cannot generate circos heat map for discordant pairs for single query, error!\n", __LINE__, __func__);
 				return FAILED;
@@ -217,11 +175,7 @@ short generateCircosData(queryMatchInfo_t *queryMatchInfoSet, readSet_t *readSet
 
 	fclose(fpQueryCovData);
 	fclose(fpZeroCov);
-	fclose(fpDiscorCov);
-//	fclose(fpOrphanedCov);
-//	fclose(fpSPRatio);
-//	fclose(fpSMinusRatio);
-//	fclose(fpSPlusRatio);
+	fclose(fpDiscorRatio);
 	fclose(fpMultiRatio);
 	fclose(fpQueryDisNum);
 	fclose(fpResult);
@@ -253,11 +207,14 @@ short generateCircosQueryData(char *queryFileCircos, queryMatchInfo_t *queryMatc
 		queryItem = queryMatchInfoSet->queryArray + i;
 		queryLen = queryItem->queryLen;
 
-//		if(queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
+		// data for ecoli
+//		if(queryItem->queryID==1 || queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
 //			|| queryItem->queryID==28 || queryItem->queryID==36 || queryItem->queryID==38
 //			|| queryItem->queryID==41 || queryItem->queryID==42 || queryItem->queryID==43 || queryItem->queryID==45 || queryItem->queryID==46
 //			|| queryItem->queryID==47 || queryItem->queryID==54 || queryItem->queryID==56 || queryItem->queryID==60
 //			|| queryItem->queryID==61 || queryItem->queryID==64 || queryItem->queryID==67 || queryItem->queryID==71)
+
+		// data for spombe
 		if(strcmp(queryItem->queryTitle, "scf7180000013910")==0 || strcmp(queryItem->queryTitle, "scf7180000013931")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000013975")==0 || strcmp(queryItem->queryTitle, "scf7180000014158")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000014214")==0 || strcmp(queryItem->queryTitle, "scf7180000014218")==0
@@ -279,11 +236,14 @@ short generateCircosQueryData(char *queryFileCircos, queryMatchInfo_t *queryMatc
 		queryItem = queryMatchInfoSet->queryArray + i;
 		queryLen = queryItem->queryLen;
 
-//		if(queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
+		// data for ecoli
+//		if(queryItem->queryID==1 || queryItem->queryID==3 || queryItem->queryID==8 || queryItem->queryID==22
 //			|| queryItem->queryID==28 || queryItem->queryID==36 || queryItem->queryID==38
 //			|| queryItem->queryID==41 || queryItem->queryID==42 || queryItem->queryID==43 || queryItem->queryID==45 || queryItem->queryID==46
 //			|| queryItem->queryID==47 || queryItem->queryID==54 || queryItem->queryID==56 || queryItem->queryID==60
 //			|| queryItem->queryID==61 || queryItem->queryID==64 || queryItem->queryID==67 || queryItem->queryID==71)
+
+		// data for spombe
 		if(strcmp(queryItem->queryTitle, "scf7180000013910")==0 || strcmp(queryItem->queryTitle, "scf7180000013931")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000013975")==0 || strcmp(queryItem->queryTitle, "scf7180000014158")==0
 			|| strcmp(queryItem->queryTitle, "scf7180000014214")==0 || strcmp(queryItem->queryTitle, "scf7180000014218")==0
@@ -412,7 +372,7 @@ short generateCircosDisNumSingleQuery(FILE *fpQueryDisNum, char *queryLabel, bas
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorCov, /*FILE *fpOrphanedCov, FILE *fpSPRatio, FILE *fpSMinusRatio, FILE *fpSPlusRatio,*/ FILE *fpMultiRatio, char *queryLabel, query_t *queryItem, readSet_t *readSet)
+short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorRatio, FILE *fpMultiRatio, char *queryLabel, query_t *queryItem, readSet_t *readSet)
 {
 	ratioRegion_t *ratioRegionArray;
 	int32_t ratioRegionNum, subRegSize;
@@ -427,7 +387,7 @@ short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorCov, /*FILE *fp
 	}
 
 	// fill the ratioRegion array
-	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet)==FAILED)
+	if(fillRatioRegionArray(ratioRegionArray, ratioRegionNum, queryItem, readSet, NO)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot fill the ratioRegion array, error!\n", __LINE__, __func__);
 		return FAILED;
@@ -441,18 +401,11 @@ short generateCircosHeatmapAndRatioDataSingleQuery(FILE *fpDiscorCov, /*FILE *fp
 	}
 
 	// output the discordant, multi-align ratio data
-	if(outputCircosHeatmapSingleQuery(fpDiscorCov, /*fpOrphanedCov,*/ fpMultiRatio, queryLabel, ratioRegionArray, ratioRegionNum)==FAILED)
+	if(outputCircosHeatmapSingleQuery(fpDiscorRatio, fpMultiRatio, queryLabel, ratioRegionArray, ratioRegionNum)==FAILED)
 	{
 		printf("line=%d, In %s(), cannot output the circos heat map data, error!\n", __LINE__, __func__);
 		return FAILED;
 	}
-
-	// output ratios
-//	if(outputCircosRatiosSingleQuery(fpSPRatio, fpSMinusRatio, fpSPlusRatio, queryLabel, ratioRegionArray, ratioRegionNum)==FAILED)
-//	{
-//		printf("line=%d, In %s(), cannot output the circos ratio data, error!\n", __LINE__, __func__);
-//		return FAILED;
-//	}
 
 	// free memory
 	if(ratioRegionNum>0)
@@ -502,9 +455,6 @@ short initRatioRegArrayCircos(ratioRegion_t **ratioRegionArray, int32_t *ratioRe
 		(*ratioRegionArray)[itemNum].zeroCovNum = 0;
 		(*ratioRegionArray)[itemNum].discorNum = 0;
 
-		(*ratioRegionArray)[itemNum].SPRatio = -1;
-		(*ratioRegionArray)[itemNum].singleMinusRatio = -1;
-		(*ratioRegionArray)[itemNum].singlePlusRatio = -1;
 		(*ratioRegionArray)[itemNum].discorRatio = -1;
 		itemNum ++;
 	}
@@ -523,23 +473,28 @@ short initRatioRegArrayCircos(ratioRegion_t **ratioRegionArray, int32_t *ratioRe
  *  @return:
  *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
  */
-short outputCircosHeatmapSingleQuery(FILE *fpDiscorCov, /*FILE *fpOrphanedCov,*/ FILE *fpMultiRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
+short outputCircosHeatmapSingleQuery(FILE *fpDiscorRatio, FILE *fpMultiRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
 {
-	int32_t i, startRow, endRow, discorNum, singleNum;
+	int32_t i, startRow, endRow, discorNum;
 	int32_t endHeadRow, startTailRow;
-	double multiRatio;
+	double multiRatio, discorRatio;
 
 	for(i=0; i<ratioRegionNum; i++)
 	{
 		startRow = ratioRegionArray[i].startQPosLHalf - 1;
 		endRow = ratioRegionArray[i].endQPosRHalf - 1;
 		discorNum = ratioRegionArray[i].discorNum;
-		//singleNum = ratioRegionArray[i].singleNum;
 
 		if(discorNum>0)
-			fprintf(fpDiscorCov, "%s\t%d\t%d\t%d\n", queryLabel, startRow, endRow, discorNum);
-//		if(singleNum>0)
-//			fprintf(fpOrphanedCov, "%s\t%d\t%d\t%d\n", queryLabel, startRow, endRow, singleNum);
+			discorRatio = ratioRegionArray[i].discorRatio;
+		else
+			discorRatio = 0;
+
+		if(discorRatio>0)
+		{
+			fprintf(fpDiscorRatio, "%s\t%d\t%d\t%.8f\n", queryLabel, startRow, endRow, discorRatio);
+		}else
+			fprintf(fpDiscorRatio, "%s\t%d\t%d\t%d\n", queryLabel, startRow, endRow, 0);
 	}
 
 	endHeadRow = startTailRow = -1;
@@ -579,38 +534,6 @@ short outputCircosHeatmapSingleQuery(FILE *fpDiscorCov, /*FILE *fpOrphanedCov,*/
 	return SUCCESSFUL;
 }
 
-/**
- * Output Circos ratio data for single query.
- *  @return:
- *  	If succeeds, return SUCCESSFUL; otherwise, return FAILED.
- */
-short outputCircosRatiosSingleQuery(FILE *fpSPRatio, FILE *fpSMinusRatio, FILE *fpSPlusRatio, char *queryLabel, ratioRegion_t *ratioRegionArray, int32_t ratioRegionNum)
-{
-	int32_t i, startRow, endRow;
-	double SPRatio, singleMinusRatio, singlePlusRatio;
-
-	for(i=0; i<ratioRegionNum; i++)
-	{
-		startRow = ratioRegionArray[i].startQPosLHalf - 1;
-		endRow = ratioRegionArray[i].endQPosRHalf - 1;
-		SPRatio = ratioRegionArray[i].SPRatio;
-		singleMinusRatio = ratioRegionArray[i].singleMinusRatio;
-		singlePlusRatio = ratioRegionArray[i].singlePlusRatio;
-
-		if(SPRatio<0)
-			SPRatio = 0;
-		if(singleMinusRatio<0)
-			singleMinusRatio = 0;
-		if(singlePlusRatio<0)
-			singlePlusRatio = 0;
-
-		fprintf(fpSPRatio, "%s\t%d\t%d\t%.8f\n", queryLabel, startRow, endRow, SPRatio);
-		fprintf(fpSMinusRatio, "%s\t%d\t%d\t%.8f\n", queryLabel, startRow, endRow, singleMinusRatio);
-		fprintf(fpSPlusRatio, "%s\t%d\t%d\t%.8f\n", queryLabel, startRow, endRow, singlePlusRatio);
-	}
-
-	return SUCCESSFUL;
-}
 
 /**
  * Generate Circos result data for single query.

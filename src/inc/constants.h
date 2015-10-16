@@ -15,8 +15,8 @@
 #define NULL ((void *)0)
 #endif
 
-#define MISFINDER_VERSION_STR			("v0.4.05.02")
-#define MISFINDER_RELEASE_DATE_STR		("Jun 7, 2015")
+#define MISFINDER_VERSION_STR			("v0.4.05.04")
+#define MISFINDER_RELEASE_DATE_STR		("Oct 15, 2015")
 
 
 #define DEBUG_SCAF_OVERLAP_FLAG		(NO)
@@ -109,7 +109,7 @@
 
 #define MIN_QUERY_LEN_THRES				100
 #define SHORT_QUERY_LEN_THRES			200
-#define MATCHED_PERCENT_THRES			0.95f
+#define MATCHED_PERCENT_THRES			0.9f
 #define MATCH_PERCENT_FACTOR			0.8f
 //#define MIN_TOTAL_MATCH_LEN_THRES		30
 #define VARY_LEN_THRES					1000
@@ -174,6 +174,7 @@
 #define MIS_DENSITY_THRES				0.1f
 
 #define DISAGREE_RATIO_THRES			0.9f
+#define REG_COV_SIZE_THRES				50
 
 #define UNUSED_MISASS					0
 #define POTENTIAL_MISASS				1
