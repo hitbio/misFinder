@@ -140,12 +140,8 @@ short validateMisassQueries(char *outputPathStr, char *newQueryFile, char *query
 		printf("There are no potential mis-assembled queries.\n");
 	}
 
-	printf("-=-=-=-====== Before Free Misass.\n");
-
 	// free query match information, readSetArray, query index
 	freeMemMisass(&queryMatchInfoSet, &readSetArray, &queryIndex);
-
-	printf("-=-=-=-====== After Free Misass.\n");
 
 	return SUCCESSFUL;
 }
