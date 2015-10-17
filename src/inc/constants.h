@@ -15,8 +15,8 @@
 #define NULL ((void *)0)
 #endif
 
-#define MISFINDER_VERSION_STR			("v0.4.05.04")
-#define MISFINDER_RELEASE_DATE_STR		("Oct 15, 2015")
+#define MISFINDER_VERSION_STR			("v0.4.05.05")
+#define MISFINDER_RELEASE_DATE_STR		("Oct 17, 2015")
 
 
 #define DEBUG_SCAF_OVERLAP_FLAG		(NO)

@@ -388,7 +388,7 @@ short adjustMisInfoList(query_t *queryItem)
 short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray)
 {
 	int32_t i, globalSegNum, subjectID, subjectLen, queryID, queryLen, validIndelFlag;
-	int32_t winSize, increaseSize, alignSeqSize, strand, startAlignRowQuery, startAlignRowSubject, remainLenQuery, remainLenSubject;
+	int32_t winSize, stepSize, increaseSize, alignSeqSize, strand, startAlignRowQuery, startAlignRowSubject, remainLenQuery, remainLenSubject;
 	int32_t startQueryPos, endQueryPos, startSubjectPos, endSubjectPos, rightMostQueryPos, rightMostSubjectPos;
 	int32_t gapNumQuery, gapNumSubject, startAlignPosQuery, startAlignPosSubject;
 	globalValidSeg_t *globalSegArray;
@@ -401,6 +401,7 @@ short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray)
 
 
 	winSize = 300;
+	stepSize = 200;
 	globalSegArray = queryItem->globalValidSegArray;
 	globalSegNum = queryItem->globalValidSegNum;
 
@@ -440,11 +441,11 @@ short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray)
 
 				startQueryPos = startAlignPosQuery;
 				startSubjectPos = startAlignPosSubject;
-				endQueryPos = globalSegArray[i].endQueryPos - 200;
+				endQueryPos = globalSegArray[i].endQueryPos - stepSize;
 				if(globalSegArray[i].strand==PLUS_STRAND)
-					endSubjectPos = globalSegArray[i].endSubPos - 200;
+					endSubjectPos = globalSegArray[i].endSubPos - stepSize;
 				else
-					endSubjectPos = globalSegArray[i].endSubPos + 200;
+					endSubjectPos = globalSegArray[i].endSubPos + stepSize;
 
 				// loop to detect the indel regions
 				increaseSize = 0;
@@ -522,10 +523,6 @@ short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray)
 
 					if(exactMatchFlag==NO)
 					{
-						// ########################### Debug information ##############################
-						//printf("@@@@@@@@@@@@@@ queryID=%d, subjectID=%d, startAlignRowQuery=%d, startAlignRowSubject=%d, queryAlignSeqLen=%d, subjectAlignSeqLen=%d\n", queryID, subjectID, startAlignRowQuery, startAlignRowSubject, queryAlignSeqLen, subjectAlignSeqLen);
-						// ########################### Debug information ##############################
-
 						// generate alignment
 						if(computeSeqAlignment(alignResultArray, &overlapLen, &mismatchNum, &queryLeftShiftLen, &subjectLeftShiftLen, &queryRightShiftLen, &subjectRightShiftLen, queryAlignSeq, subjectAlignSeq, queryAlignSeqLen, subjectAlignSeqLen, NO)==FAILED)
 						{
@@ -556,24 +553,25 @@ short getMisInfoListInner(query_t *queryItem, subject_t *subjectArray)
 							{
 								if(startAlignRowQuery>=startQueryPos-1)
 								{
-									startAlignRowQuery -= 100;
+									startAlignRowQuery -= stepSize;
 									if(strand==PLUS_STRAND)
-										startAlignRowSubject -= 100;
+										startAlignRowSubject -= stepSize;
 									else
-										startAlignRowSubject += 100;
+										startAlignRowSubject += stepSize;
+									increaseSize += stepSize;
 									continueFlag = YES;
 								}
 
-								if(rightMostQueryPos-startAlignRowQuery-1>=winSize)
+								if(rightMostQueryPos-startAlignRowQuery-1>=winSize*3)
 								{
 									recomputeStartAlignPosFlag = YES;
 									continueFlag = YES;
 								}
 							}
 
-							if(validTailAlignFlag==NO && increaseSize<=500)
+							if(validTailAlignFlag==NO && increaseSize<=stepSize*10)
 							{
-								increaseSize += 100;
+								increaseSize += stepSize;
 								continueFlag = YES;
 							}
 
@@ -901,13 +899,15 @@ short computeAlignGapNum(int32_t *gapNum1, int32_t *gapNum2, int32_t *misNum, ch
 	*misNum = 0;
 	for(i=0; i<overlapLen; i++)
 	{
-		if(alignResultArray[0][i]=='-')
-			(*gapNum1) ++;
-		else if(alignResultArray[2][i]=='-')
-			(*gapNum2) ++;
-
-		if(alignResultArray[0][i]!='|')
+		if(alignResultArray[1][i]!='|')
+		{
 			(*misNum) ++;
+
+			if(alignResultArray[0][i]=='-' || alignResultArray[0][i]=='N' || alignResultArray[0][i]=='n' || alignResultArray[0][i]=='.')
+				(*gapNum1) ++;
+			else if(alignResultArray[2][i]=='-' || alignResultArray[2][i]=='N' || alignResultArray[2][i]=='n' || alignResultArray[2][i]=='.')
+				(*gapNum2) ++;
+		}
 	}
 
 	return SUCCESSFUL;
